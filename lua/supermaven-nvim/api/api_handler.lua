@@ -7,6 +7,8 @@ local preview = require("supermaven-nvim.completion_preview")
 local log = require("supermaven-nvim.logger")
 local http_client = require("supermaven-nvim.api.http_client")
 local prompt_builder = require("supermaven-nvim.api.prompt_builder")
+local context_tracker = require("supermaven-nvim.context_tracker")
+local treesitter_extractor = require("supermaven-nvim.treesitter.context_extractor")
 
 local APIHandler = {
   state_map = {},
@@ -267,7 +269,30 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
   local max_tokens = config.api.max_tokens or 100
   local temperature = config.api.temperature or 0.2
 
-  local messages = prompt_builder.build_completion_prompt(file_path, buffer_text, cursor_offset)
+  -- Get change history if context tracking is enabled
+  local change_history = context_tracker.is_enabled() and context_tracker.get_formatted_history() or nil
+
+  -- Get treesitter context if enabled
+  local treesitter_context = nil
+  if treesitter_extractor.is_enabled() then
+    -- Determine language from file extension
+    local file_ext = file_path:match("%.([^%.]+)$")
+    local lang_map = {
+      ts = "typescript", tsx = "tsx", js = "javascript", jsx = "javascriptreact",
+      lua = "lua", py = "python", go = "go"
+    }
+    local lang = lang_map[file_ext] or file_ext
+
+    treesitter_context = treesitter_extractor.extract_context(self.buffer, file_path, lang, self.cursor)
+  end
+
+  local messages = prompt_builder.build_completion_prompt(
+    file_path,
+    buffer_text,
+    cursor_offset,
+    change_history,
+    treesitter_context
+  )
 
   local headers = {
     ["Authorization"] = "Bearer " .. api_key,

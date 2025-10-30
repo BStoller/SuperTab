@@ -1,6 +1,7 @@
 local handler_factory = require("supermaven-nvim.handler_factory")
 local preview = require("supermaven-nvim.completion_preview")
 local config = require("supermaven-nvim.config")
+local context_tracker = require("supermaven-nvim.context_tracker")
 
 local M = {
   augroup = nil,
@@ -55,10 +56,25 @@ M.setup = function()
     end,
   })
 
+  vim.api.nvim_create_autocmd({ "InsertEnter" }, {
+    group = M.augroup,
+    callback = function(event)
+      local bufnr = event.buf
+      if context_tracker.is_enabled() then
+        context_tracker.capture_snapshot(bufnr)
+      end
+    end,
+  })
+
   vim.api.nvim_create_autocmd({ "InsertLeave" }, {
     group = M.augroup,
     callback = function(event)
       preview:dispose_inlay()
+
+      local bufnr = event.buf
+      if context_tracker.is_enabled() then
+        context_tracker.record_change(bufnr)
+      end
     end,
   })
 

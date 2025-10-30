@@ -18,8 +18,10 @@ end
 ---@param file_path string Path to the file
 ---@param file_content string Content of the file
 ---@param cursor_offset integer Character offset of cursor position
+---@param change_history string|nil Optional formatted change history
+---@param treesitter_context string|nil Optional treesitter extracted context
 ---@return table OpenAI messages array
-function M.build_completion_prompt(file_path, file_content, cursor_offset)
+function M.build_completion_prompt(file_path, file_content, cursor_offset, change_history, treesitter_context)
   -- Handle nil content gracefully
   if not file_content then
     file_content = ""
@@ -41,11 +43,29 @@ function M.build_completion_prompt(file_path, file_content, cursor_offset)
         .. "Do not include explanations or markdown formatting. "
         .. "Return only the raw code completion."
     },
-    {
-      role = "user",
-      content = string.format("Complete the %s code at <|cursor|>:\n\n%s", language, content_with_cursor)
-    }
   }
+
+  -- Add change history if provided
+  if change_history and change_history ~= "" then
+    table.insert(messages, {
+      role = "user",
+      content = change_history
+    })
+  end
+
+  -- Add treesitter context if provided
+  if treesitter_context and treesitter_context ~= "" then
+    table.insert(messages, {
+      role = "user",
+      content = treesitter_context
+    })
+  end
+
+  -- Add the current code
+  table.insert(messages, {
+    role = "user",
+    content = string.format("Complete the %s code at <|cursor|>:\n\n%s", language, content_with_cursor)
+  })
 
   return messages
 end
