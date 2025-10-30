@@ -6,13 +6,7 @@ local M = {}
 
 local function create_alias(old, new)
   vim.api.nvim_create_user_command(old, function(opts)
-    log:warn(
-      string.format(
-        "Command :%s is deprecated. Use :%s instead.",
-        old,
-        new
-      )
-    )
+    log:warn(string.format("Command :%s is deprecated. Use :%s instead.", old, new))
     local cmd = new
     if opts.args and opts.args ~= "" then
       cmd = cmd .. " " .. opts.args
@@ -42,18 +36,6 @@ M.setup = function()
     log:trace(string.format("SuperTab is %s", api.is_running() and "running" or "not running"))
   end, {})
 
-  vim.api.nvim_create_user_command("SuperTabUseFree", function()
-    api.use_free_version()
-  end, {})
-
-  vim.api.nvim_create_user_command("SuperTabUsePro", function()
-    api.use_pro()
-  end, {})
-
-  vim.api.nvim_create_user_command("SuperTabLogout", function()
-    api.logout()
-  end, {})
-
   vim.api.nvim_create_user_command("SuperTabShowLog", function()
     api.show_log()
   end, {})
@@ -76,19 +58,6 @@ M.setup = function()
     msg_log.clear_log()
     log:info("Message log cleared")
   end, {})
-
-  create_alias("SupermavenStart", "SuperTabStart")
-  create_alias("SupermavenStop", "SuperTabStop")
-  create_alias("SupermavenRestart", "SuperTabRestart")
-  create_alias("SupermavenToggle", "SuperTabToggle")
-  create_alias("SupermavenStatus", "SuperTabStatus")
-  create_alias("SupermavenUseFree", "SuperTabUseFree")
-  create_alias("SupermavenUsePro", "SuperTabUsePro")
-  create_alias("SupermavenLogout", "SuperTabLogout")
-  create_alias("SupermavenShowLog", "SuperTabShowLog")
-  create_alias("SupermavenClearLog", "SuperTabClearLog")
-  create_alias("SupermavenShowMessages", "SuperTabShowMessages")
-  create_alias("SupermavenClearMessages", "SuperTabClearMessages")
 end
 
 return M

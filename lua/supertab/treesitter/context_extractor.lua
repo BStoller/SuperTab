@@ -722,6 +722,60 @@ local function gather_package_entry_candidates(metadata)
   return candidates
 end
 
+local function resolve_candidate_path(candidate_base)
+  if not candidate_base or candidate_base == "" then
+    return nil
+  end
+
+  local normalized_candidate = normalize(candidate_base)
+
+  local function check_file(path)
+    local stat = uv.fs_stat(path)
+    if stat and stat.type == "file" then
+      return path
+    end
+    if stat and stat.type == "link" then
+      local real = uv.fs_realpath(path)
+      if real then
+        local real_stat = uv.fs_stat(real)
+        if real_stat and real_stat.type == "file" then
+          return real
+        end
+      end
+    end
+    return nil
+  end
+
+  local existing_ext = normalized_candidate:match("%.[^/%.]+$")
+  local base_without_ext = normalized_candidate
+  if existing_ext then
+    base_without_ext = normalized_candidate:sub(1, #normalized_candidate - #existing_ext)
+    local exact = check_file(normalized_candidate)
+    if exact then
+      return normalize(exact)
+    end
+  end
+
+  for _, ext in ipairs(DEFAULT_EXTENSIONS) do
+    local resolved = check_file(base_without_ext .. ext)
+    if resolved then
+      return normalize(resolved)
+    end
+  end
+
+  local stat = uv.fs_stat(normalized_candidate)
+  if stat and stat.type == "directory" then
+    for _, index_name in ipairs(INDEX_FILES) do
+      local resolved = check_file(join_paths(normalized_candidate, index_name))
+      if resolved then
+        return normalize(resolved)
+      end
+    end
+  end
+
+  return nil
+end
+
 local function resolve_node_module_import(base_dir, specifier)
   if not base_dir or base_dir == "" or not specifier or specifier == "" then
     return nil
@@ -784,60 +838,6 @@ local function resolve_node_module_import(base_dir, specifier)
   end
 
   log:debug(string.format("[treesitter] Unable to resolve module import '%s'", specifier))
-  return nil
-end
-
-local function resolve_candidate_path(candidate_base)
-  if not candidate_base or candidate_base == "" then
-    return nil
-  end
-
-  local normalized_candidate = normalize(candidate_base)
-
-  local function check_file(path)
-    local stat = uv.fs_stat(path)
-    if stat and stat.type == "file" then
-      return path
-    end
-    if stat and stat.type == "link" then
-      local real = uv.fs_realpath(path)
-      if real then
-        local real_stat = uv.fs_stat(real)
-        if real_stat and real_stat.type == "file" then
-          return real
-        end
-      end
-    end
-    return nil
-  end
-
-  local existing_ext = normalized_candidate:match("%.[^/%.]+$")
-  local base_without_ext = normalized_candidate
-  if existing_ext then
-    base_without_ext = normalized_candidate:sub(1, #normalized_candidate - #existing_ext)
-    local exact = check_file(normalized_candidate)
-    if exact then
-      return normalize(exact)
-    end
-  end
-
-  for _, ext in ipairs(DEFAULT_EXTENSIONS) do
-    local resolved = check_file(base_without_ext .. ext)
-    if resolved then
-      return normalize(resolved)
-    end
-  end
-
-  local stat = uv.fs_stat(normalized_candidate)
-  if stat and stat.type == "directory" then
-    for _, index_name in ipairs(INDEX_FILES) do
-      local resolved = check_file(join_paths(normalized_candidate, index_name))
-      if resolved then
-        return normalize(resolved)
-      end
-    end
-  end
-
   return nil
 end
 
@@ -1297,25 +1297,87 @@ local function schedule_lsp_refresh(bufnr, file_path, lang, import_nodes, import
       end
 
       local contexts = {}
-      for _, entry in ipairs(resolved_entries) do
-        if #contexts >= max_files then
-          break
+      local visited_paths = {}
+      visited_paths[normalize(file_path)] = true
+
+      -- Function to recursively collect imports from resolved files
+      local function collect_recursive_imports(entries_to_process, current_depth)
+        if current_depth > import_depth or #contexts >= max_files then
+          return
         end
-        local content
-        if entry.ranges and #entry.ranges > 0 then
-          content = extract_file_segments(entry.path, entry.ranges, max_lines_per_file)
-        else
-          content = read_file(entry.path, max_lines_per_file)
+
+        local next_level_paths = {}
+
+        for _, entry in ipairs(entries_to_process) do
+          if #contexts >= max_files then
+            break
+          end
+
+          -- Read the file content (respecting ranges if available)
+          local content
+          if entry.ranges and #entry.ranges > 0 then
+            content = extract_file_segments(entry.path, entry.ranges, max_lines_per_file)
+          else
+            content = read_file(entry.path, max_lines_per_file)
+          end
+
+          if content then
+            log:debug(string.format("[treesitter] Including file %s at depth %d (%d bytes)", entry.path, current_depth, #content))
+            local lang = get_language_from_path(entry.path)
+            table.insert(contexts, {
+              path = entry.path,
+              content = content,
+              language = lang,
+            })
+
+            -- Extract imports from this file to process at the next depth level
+            if current_depth < import_depth and #contexts < max_files then
+              local full_content = read_entire_file(entry.path)
+              if not full_content then
+                log:debug(string.format("[treesitter] Could not read full content from %s for import extraction", entry.path))
+              else
+                local import_specs = extract_import_paths_from_text(full_content, lang)
+                log:debug(string.format("[treesitter] Found %d imports in %s", #import_specs, entry.path))
+                if #import_specs > 0 then
+                  local base_dir = dirname(entry.path)
+                  local entry_resolver = get_tsconfig_alias_resolver(entry.path) or alias_resolver
+
+                  for _, spec in ipairs(import_specs) do
+                    if #contexts >= max_files then
+                      break
+                    end
+
+                    local resolved = resolve_import_path(base_dir, spec.specifier, entry_resolver)
+                    if resolved then
+                      local normalized = normalize(resolved)
+                      if normalized and not visited_paths[normalized] then
+                        visited_paths[normalized] = true
+                        table.insert(next_level_paths, { path = resolved, ranges = {} })
+                        log:debug(string.format("[treesitter] Discovered import '%s' from %s -> %s (will process at depth %d)", spec.specifier, entry.path, resolved, current_depth + 1))
+                      else
+                        log:debug(string.format("[treesitter] Skipping already visited: %s", normalized or resolved))
+                      end
+                    else
+                      log:debug(string.format("[treesitter] Could not resolve import '%s' from %s", spec.specifier, entry.path))
+                    end
+                  end
+                end
+              end
+            end
+          else
+            log:debug(string.format("[treesitter] No content extracted from %s (ranges: %d)", entry.path, entry.ranges and #entry.ranges or 0))
+          end
         end
-        if content then
-          log:debug(string.format("[treesitter] LSP resolved import to %s", entry.path))
-          table.insert(contexts, {
-            path = entry.path,
-            content = content,
-            language = get_language_from_path(entry.path),
-          })
+
+        -- Recursively process the next level
+        if #next_level_paths > 0 and current_depth + 1 <= import_depth and #contexts < max_files then
+          log:debug(string.format("[treesitter] Recursing to depth %d with %d files", current_depth + 1, #next_level_paths))
+          collect_recursive_imports(next_level_paths, current_depth + 1)
         end
       end
+
+      -- Start recursive collection from the initial LSP-resolved entries
+      collect_recursive_imports(resolved_entries, 1)
 
       finalize_refresh(file_path, changedtick, contexts)
     end
