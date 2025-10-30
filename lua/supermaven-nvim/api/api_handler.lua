@@ -169,15 +169,8 @@ function APIHandler:poll_once()
     return
   end
 
-  local maybe_completion = self:check_state(
-    prefix,
-    line_before_cursor,
-    line_after_cursor,
-    false,
-    get_following_line,
-    query_state_id,
-    nil
-  )
+  local maybe_completion =
+    self:check_state(prefix, line_before_cursor, line_after_cursor, false, get_following_line, query_state_id, nil)
 
   if maybe_completion == nil then
     preview:dispose_inlay()
@@ -190,8 +183,9 @@ function APIHandler:poll_once()
 
   self.wants_polling = maybe_completion.is_incomplete
 
-  if maybe_completion.dedent == nil or
-    (#maybe_completion.dedent > 0 and not u.ends_with(line_before_cursor, maybe_completion.dedent))
+  if
+    maybe_completion.dedent == nil
+    or (#maybe_completion.dedent > 0 and not u.ends_with(line_before_cursor, maybe_completion.dedent))
   then
     return
   end
@@ -278,21 +272,21 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
     -- Determine language from file extension
     local file_ext = file_path:match("%.([^%.]+)$")
     local lang_map = {
-      ts = "typescript", tsx = "tsx", js = "javascript", jsx = "javascriptreact",
-      lua = "lua", py = "python", go = "go"
+      ts = "typescript",
+      tsx = "tsx",
+      js = "javascript",
+      jsx = "javascriptreact",
+      lua = "lua",
+      py = "python",
+      go = "go",
     }
     local lang = lang_map[file_ext] or file_ext
 
     treesitter_context = treesitter_extractor.extract_context(self.buffer, file_path, lang, self.cursor)
   end
 
-  local messages = prompt_builder.build_completion_prompt(
-    file_path,
-    buffer_text,
-    cursor_offset,
-    change_history,
-    treesitter_context
-  )
+  local messages =
+    prompt_builder.build_completion_prompt(file_path, buffer_text, cursor_offset, change_history, treesitter_context)
 
   local headers = {
     ["Authorization"] = "Bearer " .. api_key,
@@ -315,7 +309,7 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
     local state = self.state_map[state_id]
     if state then
       state.completion = {
-        { kind = "text", text = accumulated_text }
+        { kind = "text", text = accumulated_text },
       }
     end
   end
