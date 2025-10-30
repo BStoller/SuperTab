@@ -31,12 +31,6 @@ local default_config = {
         max_depth = 2, -- How deep to follow imports (0-3)
         max_files = 20, -- Maximum files to parse
         max_lines_per_file = 200, -- Truncate large definitions
-        symbol_details = {
-          max_imports = 20,
-          max_functions = 20,
-          max_variables = 20,
-          max_types = 10,
-        },
       },
     },
   },
