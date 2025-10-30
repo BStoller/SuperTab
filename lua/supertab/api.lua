@@ -1,7 +1,7 @@
-local handler_factory = require("supermaven-nvim.handler_factory")
-local listener = require("supermaven-nvim.document_listener")
-local log = require("supermaven-nvim.logger")
-local u = require("supermaven-nvim.util")
+local handler_factory = require("supertab.handler_factory")
+local listener = require("supertab.document_listener")
+local log = require("supertab.logger")
+local u = require("supertab.util")
 
 local loop = u.uv
 

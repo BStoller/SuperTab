@@ -1,5 +1,5 @@
-local log = require("supermaven-nvim.logger")
-local msg_log = require("supermaven-nvim.message_logger")
+local log = require("supertab.logger")
+local msg_log = require("supertab.message_logger")
 
 local M = {}
 

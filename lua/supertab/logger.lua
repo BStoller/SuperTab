@@ -1,5 +1,5 @@
 ---@diagnostic disable: missing-parameter
-local c = require("supermaven-nvim.config")
+local c = require("supertab.config")
 local loop = vim.uv or vim.loop
 
 ---@class Log
@@ -42,7 +42,7 @@ local create_log_file = function()
     end
   end
 
-  log_path = join_path(vim.fn.stdpath("cache"), "supermaven-nvim.log")
+  log_path = join_path(vim.fn.stdpath("cache"), "supertab.log")
   local file = io.open(log_path, "w")
   if file == nil then
     error("Failed to create log file: " .. log_path)
@@ -77,7 +77,7 @@ function log:add_entry(level, msg)
 
   if not self.__notify_fmt then
     self.__notify_fmt = function(message)
-      return string.format(string.format("[supermaven-nvim] %s", message))
+      return string.format(string.format("[SuperTab] %s", message))
     end
   end
 
@@ -98,7 +98,7 @@ end
 --- Returns the path to the log file
 ---@return string|nil: The path to the log file or nil if it doesn't exist
 function log:get_log_path()
-  local log_path = join_path(vim.fn.stdpath("cache"), "supermaven-nvim.log")
+  local log_path = join_path(vim.fn.stdpath("cache"), "supertab.log")
   if vim.fn.filereadable(log_path) == 0 then
     return nil
   end
@@ -110,7 +110,7 @@ end
 ---@param msg string: The log message
 function log:warn(msg)
   self:add_entry("warn", msg)
-  vim.api.nvim_notify(self.__notify_fmt(msg), vim.log.levels.WARN, { title = "Supermaven" })
+  vim.api.nvim_notify(self.__notify_fmt(msg), vim.log.levels.WARN, { title = "SuperTab" })
 end
 
 --- Logs an error message to the log file
@@ -118,7 +118,7 @@ end
 ---@param msg string: The log message
 function log:error(msg)
   self:add_entry("error", msg)
-  vim.api.nvim_notify(self.__notify_fmt(msg), vim.log.levels.ERROR, { title = "Supermaven" })
+  vim.api.nvim_notify(self.__notify_fmt(msg), vim.log.levels.ERROR, { title = "SuperTab" })
 end
 
 --- Logs an informational message to the log file

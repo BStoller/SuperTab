@@ -47,7 +47,7 @@ local M = {
 }
 
 M.setup = function(args)
-  local log = require("supermaven-nvim.logger")
+  local log = require("supertab.logger")
   log:debug("=== CONFIG SETUP ===")
   log:debug("Received args: " .. vim.inspect(args))
   M.config = vim.tbl_deep_extend("force", vim.deepcopy(default_config), args)

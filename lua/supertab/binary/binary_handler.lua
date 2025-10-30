@@ -1,12 +1,12 @@
 local api = vim.api
-local u = require("supermaven-nvim.util")
+local u = require("supertab.util")
 local loop = u.uv
-local textual = require("supermaven-nvim.textual")
-local config = require("supermaven-nvim.config")
-local preview = require("supermaven-nvim.completion_preview")
-local binary_fetcher = require("supermaven-nvim.binary.binary_fetcher")
-local log = require("supermaven-nvim.logger")
-local msg_log = require("supermaven-nvim.message_logger")
+local textual = require("supertab.textual")
+local config = require("supertab.config")
+local preview = require("supertab.completion_preview")
+local binary_fetcher = require("supertab.binary.binary_fetcher")
+local log = require("supertab.logger")
+local msg_log = require("supertab.message_logger")
 
 local binary_path = binary_fetcher:fetch_binary()
 
@@ -234,7 +234,7 @@ function BinaryLifecycle:update_metadata(metadata_message)
 end
 
 function BinaryLifecycle:on_error(err)
-  require("supermaven-nvim.api").stop()
+  require("supertab.api").stop()
   log:error("Error reading stdout: " .. err)
 end
 

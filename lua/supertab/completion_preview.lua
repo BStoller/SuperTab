@@ -1,4 +1,4 @@
-local u = require("supermaven-nvim.util")
+local u = require("supertab.util")
 
 local CompletionPreview = {
   inlay_instance = nil,

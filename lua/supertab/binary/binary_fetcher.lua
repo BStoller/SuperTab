@@ -1,5 +1,5 @@
-local log = require("supermaven-nvim.logger")
-local u = require("supermaven-nvim.util")
+local log = require("supertab.logger")
+local u = require("supertab.util")
 
 local loop = u.uv
 

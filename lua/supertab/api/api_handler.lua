@@ -1,14 +1,14 @@
 local api = vim.api
-local u = require("supermaven-nvim.util")
+local u = require("supertab.util")
 local loop = u.uv
-local textual = require("supermaven-nvim.textual")
-local config = require("supermaven-nvim.config")
-local preview = require("supermaven-nvim.completion_preview")
-local log = require("supermaven-nvim.logger")
-local http_client = require("supermaven-nvim.api.http_client")
-local prompt_builder = require("supermaven-nvim.api.prompt_builder")
-local context_tracker = require("supermaven-nvim.context_tracker")
-local treesitter_extractor = require("supermaven-nvim.treesitter.context_extractor")
+local textual = require("supertab.textual")
+local config = require("supertab.config")
+local preview = require("supertab.completion_preview")
+local log = require("supertab.logger")
+local http_client = require("supertab.api.http_client")
+local prompt_builder = require("supertab.api.prompt_builder")
+local context_tracker = require("supertab.context_tracker")
+local treesitter_extractor = require("supertab.treesitter.context_extractor")
 
 local APIHandler = {
   state_map = {},

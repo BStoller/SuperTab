@@ -1,7 +1,7 @@
-local handler_factory = require("supermaven-nvim.handler_factory")
-local preview = require("supermaven-nvim.completion_preview")
-local config = require("supermaven-nvim.config")
-local context_tracker = require("supermaven-nvim.context_tracker")
+local handler_factory = require("supertab.handler_factory")
+local preview = require("supertab.completion_preview")
+local config = require("supertab.config")
+local context_tracker = require("supertab.context_tracker")
 
 local M = {
   augroup = nil,
@@ -25,7 +25,7 @@ M.setup = function()
 
   vim.api.nvim_create_autocmd({ "BufEnter" }, {
     callback = function(_)
-      local ok, api = pcall(require, "supermaven-nvim.api")
+      local ok, api = pcall(require, "supertab.api")
       if not ok then
         return
       end

@@ -1,7 +1,7 @@
-local config = require("supermaven-nvim.config")
-local diff_generator = require("supermaven-nvim.diff_generator")
-local log = require("supermaven-nvim.logger")
-local u = require("supermaven-nvim.util")
+local config = require("supertab.config")
+local diff_generator = require("supertab.diff_generator")
+local log = require("supertab.logger")
+local u = require("supertab.util")
 
 local M = {
   -- Buffer snapshots: buffer_id -> {text, file_path, timestamp}

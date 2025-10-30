@@ -1,5 +1,5 @@
-local config = require("supermaven-nvim.config")
-local log = require("supermaven-nvim.logger")
+local config = require("supertab.config")
+local log = require("supertab.logger")
 
 local uv = vim.uv or vim.loop
 

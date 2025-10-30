@@ -1,5 +1,5 @@
 ---@diagnostic disable: deprecated
-local log = require("supermaven-nvim.logger")
+local log = require("supertab.logger")
 local M = {}
 
 local function compute_lps(pattern, lps)

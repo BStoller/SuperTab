@@ -1,5 +1,5 @@
-local config = require("supermaven-nvim.config")
-local log = require("supermaven-nvim.logger")
+local config = require("supertab.config")
+local log = require("supertab.logger")
 
 local M = {}
 
@@ -27,10 +27,10 @@ function M.get_handler()
 
   if use_api then
     log:info("Using API mode for completions")
-    cached_handler = require("supermaven-nvim.api.api_handler")
+    cached_handler = require("supertab.api.api_handler")
   else
     log:info("Using Supermaven binary mode for completions")
-    cached_handler = require("supermaven-nvim.binary.binary_handler")
+    cached_handler = require("supertab.binary.binary_handler")
   end
 
   return cached_handler

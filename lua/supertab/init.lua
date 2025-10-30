@@ -1,8 +1,8 @@
-local completion_preview = require("supermaven-nvim.completion_preview")
-local log = require("supermaven-nvim.logger")
-local config = require("supermaven-nvim.config")
-local commands = require("supermaven-nvim.commands")
-local api = require("supermaven-nvim.api")
+local completion_preview = require("supertab.completion_preview")
+local log = require("supertab.logger")
+local config = require("supertab.config")
+local commands = require("supertab.commands")
+local api = require("supertab.api")
 
 local M = {}
 
@@ -42,7 +42,7 @@ M.setup = function(args)
 
   local cmp_ok, cmp = pcall(require, "cmp")
   if cmp_ok then
-    local cmp_source = require("supermaven-nvim.cmp")
+    local cmp_source = require("supertab.cmp")
     cmp.register_source("supermaven", cmp_source.new())
   else
     if config.disable_inline_completion then

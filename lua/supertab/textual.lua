@@ -1,4 +1,4 @@
-local u = require("supermaven-nvim.util")
+local u = require("supertab.util")
 local M = {}
 
 local function find_first_non_empty_newline(s)

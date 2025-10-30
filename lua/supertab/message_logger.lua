@@ -5,7 +5,7 @@ local log_file_path = nil
 local function get_log_path()
   if log_file_path == nil then
     local cache_dir = vim.fn.stdpath("cache")
-    log_file_path = cache_dir .. "/supermaven-messages.log"
+    log_file_path = cache_dir .. "/supertab-messages.log"
   end
   return log_file_path
 end
