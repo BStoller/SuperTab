@@ -6,6 +6,7 @@ local config = require("supermaven-nvim.config")
 local preview = require("supermaven-nvim.completion_preview")
 local binary_fetcher = require("supermaven-nvim.binary.binary_fetcher")
 local log = require("supermaven-nvim.logger")
+local msg_log = require("supermaven-nvim.message_logger")
 
 local binary_path = binary_fetcher:fetch_binary()
 
@@ -162,6 +163,7 @@ function BinaryLifecycle:process_line(line)
   if string.sub(line, 1, 11) == "SM-MESSAGE " then
     line = string.sub(line, 12)
     local message = vim.json.decode(line)
+    msg_log.log_incoming(message)
     self:process_message(message)
   else
     log:debug("Unknown message: " .. line)
@@ -237,6 +239,7 @@ function BinaryLifecycle:on_error(err)
 end
 
 function BinaryLifecycle:send_json(msg)
+  msg_log.log_outgoing(msg)
   local message = vim.json.encode(msg) .. "\n"
   loop.write(self.stdin, message) -- fails silently
 end

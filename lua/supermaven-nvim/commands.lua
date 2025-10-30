@@ -1,5 +1,6 @@
 local api = require("supermaven-nvim.api")
 local log = require("supermaven-nvim.logger")
+local msg_log = require("supermaven-nvim.message_logger")
 
 local M = {}
 
@@ -42,6 +43,21 @@ M.setup = function()
 
   vim.api.nvim_create_user_command("SupermavenClearLog", function()
     api.clear_log()
+  end, {})
+
+  vim.api.nvim_create_user_command("SupermavenShowMessages", function()
+    local log_path = msg_log.get_log_path()
+    if vim.fn.filereadable(log_path) == 1 then
+      vim.cmd.tabnew()
+      vim.cmd(string.format(":e %s", log_path))
+    else
+      log:warn("No message log file found. Messages will be logged to: " .. log_path)
+    end
+  end, {})
+
+  vim.api.nvim_create_user_command("SupermavenClearMessages", function()
+    msg_log.clear_log()
+    log:info("Message log cleared")
   end, {})
 end
 
