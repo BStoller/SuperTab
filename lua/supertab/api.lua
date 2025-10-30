@@ -19,6 +19,7 @@ M.start = function()
   else
     log:trace("Starting completion handler...")
   end
+  vim.g.SUPERTAB_DISABLED = 0
   vim.g.SUPERMAVEN_DISABLED = 0
   local handler = handler_factory.get_handler()
   handler:start_binary()
@@ -26,6 +27,7 @@ M.start = function()
 end
 
 M.stop = function()
+  vim.g.SUPERTAB_DISABLED = 1
   vim.g.SUPERMAVEN_DISABLED = 1
   if not M.is_running() then
     log:warn("Completion handler is not running.")

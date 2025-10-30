@@ -40,14 +40,20 @@ M.setup = function(args)
 
   commands.setup()
 
+  -- Highlight groups for completion items / suggestions
+  pcall(vim.api.nvim_set_hl, 0, "CmpItemKindSuperTab", { link = "CmpItemKindFunction" })
+  pcall(vim.api.nvim_set_hl, 0, "CmpItemKindSupermaven", { link = "CmpItemKindSuperTab" })
+
   local cmp_ok, cmp = pcall(require, "cmp")
   if cmp_ok then
     local cmp_source = require("supertab.cmp")
+    cmp.register_source("supertab", cmp_source.new())
+    -- Backwards compatibility with previous source name
     cmp.register_source("supermaven", cmp_source.new())
   else
     if config.disable_inline_completion then
       log:warn(
-        "nvim-cmp is not available, but inline completion is disabled. Supermaven nvim-cmp source will not be registered."
+        "nvim-cmp is not available, but inline completion is disabled. SuperTab nvim-cmp source will not be registered."
       )
     end
   end

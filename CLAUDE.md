@@ -1,174 +1,117 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with the SuperTab repository.
 
 ## Project Overview
 
-supermaven-nvim is a Neovim plugin that provides AI code completion with two modes:
-1. **Supermaven Binary Mode** (default): Communicates with the native Supermaven binary via stdio
-2. **API Mode**: Uses OpenAI-compatible APIs for code completion
+SuperTab is a Neovim plugin that delivers AI code completions (backed by the Supermaven service). The plugin can operate in two modes:
 
-The plugin manages inline completion previews using extmarks and integrates with nvim-cmp for completion menu display.
+1. **Binary Mode** (default): Talks directly to the local `sm-agent` binary via stdio.
+2. **API Mode**: Streams completions from an OpenAI-compatible HTTP endpoint.
+
+SuperTab renders inline “ghost text” suggestions with extmarks and also exposes a `cmp` source for completion menus.
+
+> **Compatibility note:** The project was previously named `supermaven-nvim`. Compatibility shims keep the legacy module/command names working, but new code should use the `supertab` namespace.
 
 ## Configuration
 
-### Basic Setup (Supermaven Binary Mode)
+### Basic Setup (Binary Mode)
 ```lua
-require('supermaven-nvim').setup({})
+require("supertab").setup({})
 ```
 
 ### API Mode (OpenAI-Compatible)
 ```lua
-require('supermaven-nvim').setup({
+require("supertab").setup({
   api = {
-    url = "https://api.openai.com/v1/chat/completions",  -- Or Ollama, Anthropic, etc.
-    api_key = "sk-...",  -- Your API key
+    url = "https://api.openai.com/v1/chat/completions",
+    api_key = "sk-...",
     model = "gpt-3.5-turbo",
     max_tokens = 100,
     temperature = 0.2,
-  }
+    extra_params = {}, -- optional provider-specific payload
+  },
 })
 ```
 
-**Mode Selection**: API mode is automatically enabled if `api.url` or `api.api_key` is configured. Otherwise, binary mode is used.
+API mode automatically activates when `api.api_key` (or another explicit setting) is provided. Otherwise the binary handler is used.
 
 ## Code Style
 
-- Use `stylua` for formatting: `stylua .`
-- Configuration in `.stylua.toml`: 2 spaces, Unix line endings, auto-prefer double quotes
-- Format all Lua files before committing
+- Format Lua with `stylua` (`stylua .` – config in `.stylua.toml`).
+- Two-space indentation, Unix line endings, prefer double quotes.
 
-## Architecture
+## Architecture Overview
 
-### Core Components
+### Core Modules (under `lua/supertab/`)
 
-**Handler Factory (`handler_factory.lua`)**
-- Selects the appropriate handler (binary or API) based on configuration
-- Mode is determined once at plugin load time
-- Auto-detection: API mode if `api.url` or `api.api_key` is present
-
-**Binary Communication (`lua/supermaven-nvim/binary/`)**
-- `binary_handler.lua`: Manages the lifecycle of the Supermaven binary process, handles stdio communication, and processes completion responses
-- `binary_fetcher.lua`: Downloads and caches the platform-specific binary
-- The binary is spawned as a subprocess with stdio pipes and communicates via JSON messages prefixed with "SM-MESSAGE"
-- State management tracks completion requests via incrementing state IDs, with old states purged after 50 retained states
-
-**API Communication (`lua/supermaven-nvim/api/`)**
-- `api_handler.lua`: Implements the same interface as binary_handler but uses HTTP APIs
-- `http_client.lua`: Streaming HTTP client using vim.system() with curl for Server-Sent Events (SSE)
-- `prompt_builder.lua`: Converts file content + cursor position to OpenAI chat messages format
-- Supports any OpenAI-compatible API (OpenAI, Anthropic via proxy, Ollama, etc.)
-
-**Completion Preview (`completion_preview.lua`)**
-- Renders inline completions using Neovim's extmark API (`nvim_buf_set_extmark`)
-- Two rendering modes:
-  - **Standard**: Completion appears at cursor position with `virt_text` and `virt_lines`
-  - **Floating**: Completion appears at end-of-line when cursor is mid-line
-- Manages acceptance of full completions (Tab) or partial completions (Ctrl-j, up to next word)
-- The `inlay_instance` tracks active completion state including prior_delete count for text replacement
-
-**Document Synchronization (`document_listener.lua`)**
-- Sets up autocommands to track buffer changes and cursor movements
-- Triggers on `TextChanged`, `TextChangedI`, `TextChangedP`, `CursorMoved`, `CursorMovedI`
-- Manages conditional enabling/disabling based on `config.condition()` or `g:SUPERMAVEN_DISABLED`
-- Disposes inline previews on `InsertLeave`
-
-**Configuration (`config.lua`)**
-- Default keymaps: `<Tab>` (accept), `<C-]>` (clear), `<C-j>` (accept word)
-- Supports `ignore_filetypes`, `disable_inline_completion`, `disable_keymaps`, and conditional activation
-- Uses metatable for clean config access pattern
-
-**nvim-cmp Integration (`cmp.lua`)**
-- Registered as a cmp source named "supermaven"
-- Converts inline completion to cmp items when `disable_inline_completion = true`
-- Uses `CmpItemKindSupermaven` highlight group
+- **`init.lua`** – Entry point, applies config, registers commands/keymaps, starts the selected handler.
+- **`config.lua`** – Default options and config merging (`supertab.config`).
+- **`handler_factory.lua`** – Decides between binary/API handler and caches the instance.
+- **`completion_preview.lua`** – Inline suggestion rendering via extmarks (`virt_text` / `virt_lines`).
+- **`commands.lua`** – User commands (`:SuperTabStart`, etc.) with legacy aliases (`:Supermaven*`).
+- **`document_listener.lua`** – Autocommands for buffer/cursor changes, plus conditional enablement.
+- **`context_tracker.lua`** – Keeps lightweight change history for request prompts.
+- **`cmp.lua`** – nvim-cmp source (names `supertab` and legacy `supermaven`).
+- **`logger.lua` / `message_logger.lua`** – Persistent logging helpers (`supertab.log`, `supertab-messages.log`).
+- **`binary/binary_handler.lua`** – Manages the `sm-agent` process and JSON protocol.
+- **`binary/binary_fetcher.lua`** – Downloads/caches the platform-specific binary (`~/.supertab/...`).
+- **`api/api_handler.lua`** – Mirrors the binary handler interface using streaming HTTP (`http_client.lua`).
+- **`treesitter/context_extractor.lua`** – Builds contextual snippets using Tree-sitter + LSP definition lookups, now trimmed to imported ranges.
 
 ### Key Patterns
 
-1. **State Management**: `binary_handler.lua:submit_query()` creates state entries that map prefixes to completion arrays. As users type, `check_state()` finds the best matching state and strips the user's typed prefix from cached completions.
+- **State Management** – Handlers cache completion states keyed by cursor prefix. `check_state()` strips user-typed text to reuse cached responses.
+- **Polling Loop** – Binary handler keeps a timer that polls every 25 ms until results arrive or a 5 s timeout elapses.
+- **Inline Editing** – Accepting a suggestion deletes `prior_delete` characters and applies the new text via `vim.lsp.util.apply_text_edits` for multiline safety.
+- **Context Refresh** – Tree-sitter import discovery now invokes `textDocument/definition` asynchronously. Resolved files are cached, and only the relevant ranges are sent.
+- **Compatibility** – All Lua modules and commands under the old `supermaven-nvim` namespace are aliased to the new equivalents.
 
-2. **Polling Loop**: A 25ms timer polls for new completions via `poll_once()` when `wants_polling` is true, stopping after 5 seconds of inactivity.
+## Testing & Debugging Tips
 
-3. **Text Replacement**: When accepting completions, `prior_delete` characters are removed before cursor, then the completion text is inserted via LSP `apply_text_edits` to handle multi-line completions.
+- Use a minimal Neovim config to sanity-check completions in various filetypes.
+- Increase verbosity with `require("supertab").setup({ log_level = "trace" })`.
+- Logs live in `stdpath('cache')/supertab.log`; protocol dumps in `supertab-messages.log`.
+- Commands `:SuperTabShowLog`, `:SuperTabClearLog`, `:SuperTabShowMessages`, `:SuperTabClearMessages` manage logs; the `Supermaven*` variants still exist but are deprecated.
+- Ensure buffers are valid before mutating (`nvim_buf_is_valid`) and guard extmark operations.
 
-4. **Message Protocol**: Binary messages include:
-   - `greeting`: Initial handshake
-   - `state_update`: Document and cursor changes
-   - `response`: Completion items for a state ID
-   - `activation_request`/`activation_success`: Pro account setup
-   - `service_tier`: Free/Pro status
+## Command Reference
 
-## File Organization
+New command names:
 
-```
-lua/supermaven-nvim/
-├── init.lua              # Plugin entry point, setup()
-├── handler_factory.lua   # Mode selection (binary vs API)
-├── api.lua               # Public API functions
-├── commands.lua          # Vim user commands
-├── config.lua            # Configuration management
-├── completion_preview.lua # Inline completion rendering
-├── document_listener.lua  # Buffer change tracking
-├── message_logger.lua    # Protocol message logging
-├── cmp.lua               # nvim-cmp source integration
-├── textual.lua           # Text processing utilities
-├── util.lua              # General utilities
-├── logger.lua            # Logging system
-├── types.lua             # Type definitions
-├── binary/
-│   ├── binary_handler.lua  # Binary process management
-│   └── binary_fetcher.lua  # Binary download
-└── api/
-    ├── api_handler.lua     # API mode handler
-    ├── http_client.lua     # Streaming HTTP client
-    └── prompt_builder.lua  # OpenAI prompt formatting
-```
+- `:SuperTabStart` / `:SuperTabStop` / `:SuperTabRestart` / `:SuperTabToggle`
+- `:SuperTabStatus`
+- `:SuperTabUseFree` / `:SuperTabUsePro`
+- `:SuperTabLogout`
+- `:SuperTabShowLog` / `:SuperTabClearLog`
+- `:SuperTabShowMessages` / `:SuperTabClearMessages`
 
-## Testing and Debugging
-
-**Manual Testing**
-- Load plugin in Neovim with minimal config
-- Test in insert mode with various file types
-- Verify completions appear and can be accepted/rejected
-
-**Debugging**
-- `:SupermavenShowLog` to view logs at `stdpath-cache/supermaven-nvim.log`
-- `:SupermavenClearLog` to clear logs
-- `:SupermavenShowMessages` to view protocol messages at `stdpath-cache/supermaven-messages.log`
-- `:SupermavenClearMessages` to clear protocol message log
-- Set `log_level = "trace"` in config for verbose logging
-- Check binary process: `binary:is_running()` returns boolean
-- Message log captures all JSON communication between plugin and binary for analysis
-
-**Common Issues**
-- Buffer validation: Always check `nvim_buf_is_valid(buf)` before operations (see `completion_preview.lua:98`)
-- Race conditions: The polling loop continues until completion or 5s timeout
-- State cleanup: Old states purged after `max_state_id_retention` (50) to prevent memory leaks
-
-## Commands
-
-- `:SupermavenStart` / `:SupermavenStop` / `:SupermavenRestart` / `:SupermavenToggle`
-- `:SupermavenStatus` - Check if running
-- `:SupermavenUseFree` / `:SupermavenUsePro` - Switch service tiers
-- `:SupermavenLogout` - Clear credentials
-- `:SupermavenShowLog` / `:SupermavenClearLog` - Log management
-- `:SupermavenShowMessages` / `:SupermavenClearMessages` - View/clear protocol message log (for debugging)
+Legacy `Supermaven*` commands forward to the new ones with a warning.
 
 ## Lua API
 
 ```lua
-local api = require("supermaven-nvim.api")
+local api = require("supertab.api")
 api.start()
 api.stop()
 api.restart()
 api.toggle()
 api.is_running()
+api.use_free_version()
+api.use_pro()
+api.logout()
+api.show_log()
+api.clear_log()
 ```
 
-## Key Implementation Details
+`require("supermaven-nvim.api")` remains valid and returns the same table.
 
-- **Extmark-based rendering** (not virtual text): Allows precise positioning and multi-line completions
-- **State-based caching**: Avoids re-requesting completions when user types predicted text
-- **Conditional activation**: `BufEnter` autocmd checks `config.condition()` to enable/disable per-buffer
-- **Hard size limit**: Files over 10MB (`HARD_SIZE_LIMIT = 10e6`) are not sent to the binary
-- **Graceful fallback**: If no suggestion active, Tab key passes through to normal behavior
+## Implementation Reminders
+
+- Inline previews use the `SuperTabSuggestion` highlight group (linking to `Comment` by default).
+- nvim-cmp source registers as `supertab` with highlight `CmpItemKindSuperTab`.
+- Tree-sitter contexts fall back to raw file content when LSP location ranges are unavailable.
+- Binary downloads now live under `~/.supertab` (falling back to `~/.supermaven` if already present).
+- Respect `vim.g.SUPERTAB_DISABLED` (and the legacy global) when deciding whether to update state.
+
+Keep these conventions in mind when making changes or guiding automated updates.

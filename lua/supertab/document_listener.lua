@@ -8,7 +8,7 @@ local M = {
 }
 
 M.setup = function()
-  M.augroup = vim.api.nvim_create_augroup("supermaven", { clear = true })
+  M.augroup = vim.api.nvim_create_augroup("supertab", { clear = true })
 
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "TextChangedP" }, {
     group = M.augroup,
@@ -29,7 +29,8 @@ M.setup = function()
       if not ok then
         return
       end
-      if config.condition() or vim.g.SUPERMAVEN_DISABLED == 1 then
+      local disabled = vim.g.SUPERTAB_DISABLED == 1 or vim.g.SUPERMAVEN_DISABLED == 1
+      if config.condition() or disabled then
         if api.is_running() then
           api.stop()
           return
@@ -78,16 +79,23 @@ M.setup = function()
     end,
   })
 
+  -- Default highlight linking for suggestions
+  vim.api.nvim_set_hl(0, "SuperTabSuggestion", { link = "Comment" })
+  vim.api.nvim_set_hl(0, "SupermavenSuggestion", { link = "SuperTabSuggestion" })
+
   if config.color and config.color.suggestion_color and config.color.cterm then
     vim.api.nvim_create_autocmd({ "VimEnter", "ColorScheme" }, {
       group = M.augroup,
       pattern = "*",
       callback = function(event)
-        vim.api.nvim_set_hl(0, "SupermavenSuggestion", {
+        local group = "SuperTabSuggestion"
+        vim.api.nvim_set_hl(0, group, {
           fg = config.color.suggestion_color,
           ctermfg = config.color.cterm,
         })
-        preview.suggestion_group = "SupermavenSuggestion"
+        preview.suggestion_group = group
+        -- Maintain backwards compatibility
+        vim.api.nvim_set_hl(0, "SupermavenSuggestion", { link = group })
       end,
     })
   end

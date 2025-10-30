@@ -29,7 +29,7 @@ function M.get_handler()
     log:info("Using API mode for completions")
     cached_handler = require("supertab.api.api_handler")
   else
-    log:info("Using Supermaven binary mode for completions")
+    log:info("Using SuperTab binary mode for completions")
     cached_handler = require("supertab.binary.binary_handler")
   end
 

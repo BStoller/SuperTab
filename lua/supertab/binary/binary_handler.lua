@@ -184,7 +184,7 @@ function BinaryLifecycle:process_message(message)
     end)
   elseif message.kind == "activation_success" then
     self.activate_url = nil
-    log:trace("Supermaven was activated successfully.")
+    log:trace("SuperTab was activated successfully.")
     vim.schedule(function()
       self:close_popup()
     end)
@@ -199,7 +199,7 @@ function BinaryLifecycle:process_message(message)
   elseif message.kind == "service_tier" then
     if not self.service_message_displayed then
       if message.display then
-        log:trace("Supermaven " .. message.display .. " is running.")
+        log:trace("SuperTab " .. message.display .. " is running.")
       end
       self.service_message_displayed = true
     end
@@ -515,9 +515,9 @@ end
 
 function BinaryLifecycle:show_activation_message()
   if self.activate_url ~= nil then
-    log:info([[Thank you for installing Supermaven!
+    log:info([[Thank you for installing SuperTab!
 
-Use :SupermavenUsePro to set up Supermaven Pro, or use the command :SupermavenUseFree to use the Free Tier]])
+Use :SuperTabUsePro to configure the Pro features, or run :SuperTabUseFree to switch to the Free Tier.]])
   end
 end
 
@@ -534,7 +534,7 @@ end
 
 function BinaryLifecycle:use_pro()
   if self.activate_url ~= nil then
-    log:debug("Visit " .. self.activate_url .. " to set up Supermaven Pro")
+    log:debug("Visit " .. self.activate_url .. " to finish setting up SuperTab Pro")
     self:open_popup(self.activate_url)
   else
     log:error("Could not find an activation URL.")
@@ -559,9 +559,9 @@ function BinaryLifecycle:open_popup(message, include_free)
   width = u.nvim_get_option_value("columns", { scope = "local" })
   height = u.nvim_get_option_value("lines", { scope = "local" })
 
-  local intro_message = "Please visit the following URL to set up Supermaven Pro"
+  local intro_message = "Please visit the following URL to finish setting up SuperTab Pro"
   if include_free then
-    intro_message = intro_message .. " (or use :SupermavenUseFree)."
+    intro_message = intro_message .. " (or use :SuperTabUseFree)."
   end
   local win_height = 3
   local win_width = math.max(#message, #intro_message) + 3

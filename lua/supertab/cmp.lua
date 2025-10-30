@@ -87,8 +87,8 @@ function source.complete(self, params, callback)
       filterText = nil,
       insertTextFormat = insertTextFormat,
       cmp = {
-        kind_hl_group = "CmpItemKindSupermaven",
-        kind_text = "Supermaven",
+        kind_hl_group = "CmpItemKindSuperTab",
+        kind_text = "SuperTab",
       },
       textEdit = {
         newText = completion_text,

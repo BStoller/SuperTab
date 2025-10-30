@@ -2,8 +2,8 @@ local u = require("supertab.util")
 
 local CompletionPreview = {
   inlay_instance = nil,
-  ns_id = vim.api.nvim_create_namespace("supermaven"),
-  suggestion_group = "Comment",
+  ns_id = vim.api.nvim_create_namespace("supertab"),
+  suggestion_group = "SuperTabSuggestion",
   disable_inline_completion = false,
 }
 

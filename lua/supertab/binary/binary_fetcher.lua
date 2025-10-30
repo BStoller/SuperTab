@@ -72,7 +72,7 @@ function BinaryFetcher:discover_binary_url()
 
   local json = vim.fn.json_decode(response)
   if json == nil then
-    log:error("Unable to find download URL for Supermaven binary")
+    log:error("Unable to find download URL for SuperTab binary")
     return nil
   end
 
@@ -97,7 +97,7 @@ function BinaryFetcher:fetch_binary()
     return nil
   end
 
-  log:info("Downloading Supermaven binary, please wait...")
+  log:info("Downloading SuperTab binary, please wait...")
   local temp_path = generate_temp_path(10)
 
   local platform = self:platform()
@@ -141,11 +141,28 @@ function BinaryFetcher:local_binary_parent_path()
   local data_dir = os.getenv("XDG_DATA_HOME")
   local dir
   if data_dir then
-    dir = data_dir .. "/supermaven"
+    dir = data_dir .. "/supertab"
   else
-    dir = home_dir .. "/.supermaven"
+    dir = home_dir .. "/.supertab"
   end
-  return dir .. "/binary/v20/" .. self:platform() .. "-" .. self:get_arch()
+
+  local path = dir .. "/binary/v20/" .. self:platform() .. "-" .. self:get_arch()
+
+  -- Backwards compatibility: fall back to legacy Supermaven directory if present
+  if loop.fs_stat(path) == nil then
+    local legacy_base
+    if data_dir then
+      legacy_base = data_dir .. "/supermaven"
+    else
+      legacy_base = home_dir .. "/.supermaven"
+    end
+    local legacy_path = legacy_base .. "/binary/v20/" .. self:platform() .. "-" .. self:get_arch()
+    if loop.fs_stat(legacy_path) ~= nil then
+      return legacy_path
+    end
+  end
+
+  return path
 end
 
 return BinaryFetcher
