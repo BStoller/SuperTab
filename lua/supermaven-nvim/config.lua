@@ -18,6 +18,7 @@ local default_config = {
     model = "gpt-3.5-turbo",
     max_tokens = 100,
     temperature = 0.2,
+    extra_params = {},
     -- Context enrichment for API completions
     context = {
       enabled = true, -- Enable/disable context tracking

@@ -300,6 +300,11 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
     temperature = temperature,
   }
 
+  local extra_params = config.api.extra_params
+  if type(extra_params) == "table" and next(extra_params) ~= nil then
+    body = vim.tbl_deep_extend("force", {}, body, extra_params)
+  end
+
   local accumulated_text = ""
 
   local on_chunk = function(delta_content)

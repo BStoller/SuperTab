@@ -20,6 +20,25 @@ local function get_ts_config()
   return context_conf.treesitter
 end
 
+local function normalize_location_range(location)
+  if type(location) ~= "table" then
+    return nil
+  end
+  local range = location.targetRange or location.targetSelectionRange or location.range
+  if not range or not range.start or not range["end"] then
+    return nil
+  end
+  local start_line = range.start.line or 0
+  local end_line = range["end"].line or start_line
+  if end_line <= start_line then
+    end_line = start_line + 1
+  end
+  return {
+    start_line = start_line,
+    end_line = end_line,
+  }
+end
+
 local function trim(s)
   return (s and s:match("^%s*(.-)%s*$")) or s
 end
@@ -174,10 +193,7 @@ local function iter_lsp_locations(result, cb)
     if type(location) ~= "table" then
       return
     end
-    local uri = location.uri or location.targetUri
-    if uri then
-      cb(uri)
-    end
+    cb(location)
   end
 
   if vim.tbl_islist and vim.tbl_islist(result) then
@@ -237,6 +253,83 @@ local function read_file(path, max_lines)
   return table.concat(lines, "\n")
 end
 
+local function read_entire_file(path)
+  local ok, fd = pcall(io.open, path, "r")
+  if not ok or not fd then
+    return nil
+  end
+  local content = fd:read("*a")
+  fd:close()
+  return content
+end
+
+local function extract_file_segments(path, ranges, max_lines)
+  if not ranges or #ranges == 0 then
+    return read_file(path, max_lines)
+  end
+
+  local content = read_entire_file(path)
+  if not content then
+    return nil
+  end
+
+  local lines = vim.split(content, "\n", { plain = true })
+  table.sort(ranges, function(a, b)
+    if a.start_line == b.start_line then
+      return a.end_line < b.end_line
+    end
+    return a.start_line < b.start_line
+  end)
+
+  local pieces = {}
+  local total_lines = 0
+
+  for _, range in ipairs(ranges) do
+    if max_lines > 0 and total_lines >= max_lines then
+      break
+    end
+
+    local start_idx = math.max(1, (range.start_line or 0) + 1)
+    local end_exclusive = (range.end_line or (range.start_line or 0) + 1)
+    if end_exclusive <= (range.start_line or 0) then
+      end_exclusive = (range.start_line or 0) + 1
+    end
+    local end_idx = math.min(#lines, math.max(start_idx, end_exclusive))
+
+    if start_idx > #lines then
+      goto continue_range
+    end
+
+    local segment = {}
+    table.insert(segment, string.format("[lines %d-%d]", start_idx, end_idx))
+    for i = start_idx, end_idx do
+      table.insert(segment, lines[i])
+      total_lines = total_lines + 1
+      if max_lines > 0 and total_lines >= max_lines then
+        break
+      end
+    end
+
+    table.insert(pieces, table.concat(segment, "\n"))
+
+    if max_lines > 0 and total_lines >= max_lines then
+      break
+    end
+
+    ::continue_range::
+  end
+
+  if #pieces == 0 then
+    return nil
+  end
+
+  local combined = table.concat(pieces, "\n\n")
+  if max_lines > 0 and total_lines >= max_lines then
+    combined = combined .. "\n... (truncated)"
+  end
+  return combined
+end
+
 local function indent_block(text, prefix)
   if not text or text == "" then
     return nil
@@ -247,16 +340,6 @@ local function indent_block(text, prefix)
     lines[i] = indentation .. line
   end
   return table.concat(lines, "\n")
-end
-
-local function read_entire_file(path)
-  local ok, fd = pcall(io.open, path, "r")
-  if not ok or not fd then
-    return nil
-  end
-  local content = fd:read("*a")
-  fd:close()
-  return content
 end
 
 local function file_exists(path)
@@ -1195,8 +1278,8 @@ local function schedule_lsp_refresh(bufnr, file_path, lang, import_nodes, import
     local max_lines_per_file = ts_conf.max_lines_per_file or 200
     local import_depth = math.max(0, ts_conf.max_depth or 0)
 
-    local resolved_paths = {}
-    local path_set = {}
+    local resolved_entries = {}
+    local path_entries = {}
     local pending = 0
 
     local function maybe_finish()
@@ -1204,7 +1287,7 @@ local function schedule_lsp_refresh(bufnr, file_path, lang, import_nodes, import
         return
       end
 
-      if #resolved_paths == 0 then
+      if #resolved_entries == 0 then
         log:debug(string.format("[treesitter] LSP refresh returned no paths for %s; falling back", file_path))
         clear_job(file_path)
         if import_depth > 0 and max_files > 0 then
@@ -1214,17 +1297,22 @@ local function schedule_lsp_refresh(bufnr, file_path, lang, import_nodes, import
       end
 
       local contexts = {}
-      for _, path in ipairs(resolved_paths) do
+      for _, entry in ipairs(resolved_entries) do
         if #contexts >= max_files then
           break
         end
-        local content = read_file(path, max_lines_per_file)
+        local content
+        if entry.ranges and #entry.ranges > 0 then
+          content = extract_file_segments(entry.path, entry.ranges, max_lines_per_file)
+        else
+          content = read_file(entry.path, max_lines_per_file)
+        end
         if content then
-          log:debug(string.format("[treesitter] LSP resolved import to %s", path))
+          log:debug(string.format("[treesitter] LSP resolved import to %s", entry.path))
           table.insert(contexts, {
-            path = path,
+            path = entry.path,
             content = content,
-            language = get_language_from_path(path),
+            language = get_language_from_path(entry.path),
           })
         end
       end
@@ -1261,7 +1349,7 @@ local function schedule_lsp_refresh(bufnr, file_path, lang, import_nodes, import
         break
       end
 
-      if max_files > 0 and #resolved_paths >= max_files then
+      if max_files > 0 and #resolved_entries >= max_files then
         break
       end
 
@@ -1311,17 +1399,42 @@ local function schedule_lsp_refresh(bufnr, file_path, lang, import_nodes, import
             if ok then
               log:debug(string.format("[treesitter] LSP definition result (client %s): %s", client.name or tostring(client.id), inspected))
             end
-            iter_lsp_locations(result, function(uri)
+            iter_lsp_locations(result, function(location)
+              local uri = location.uri or location.targetUri
+              if not uri then
+                return
+              end
               local ok_uri, path = pcall(vim.uri_to_fname, uri)
-              if ok_uri and path and path ~= "" then
-                path = normalize(path)
-                if path ~= normalize(file_path) and not path_set[path] then
-                  if max_files > 0 and #resolved_paths >= max_files then
-                    return
+              if not ok_uri or not path or path == "" then
+                return
+              end
+              path = normalize(path)
+              if path == normalize(file_path) then
+                return
+              end
+
+              local entry = path_entries[path]
+              if not entry then
+                if max_files > 0 and #resolved_entries >= max_files then
+                  return
+                end
+                entry = { path = path, ranges = {} }
+                path_entries[path] = entry
+                table.insert(resolved_entries, entry)
+                log:debug(string.format("[treesitter] LSP candidate path for %s: %s", file_path, path))
+              end
+
+              local range_info = normalize_location_range(location)
+              if range_info then
+                local duplicate = false
+                for _, existing in ipairs(entry.ranges) do
+                  if existing.start_line == range_info.start_line and existing.end_line == range_info.end_line then
+                    duplicate = true
+                    break
                   end
-                  log:debug(string.format("[treesitter] LSP candidate path for %s: %s", file_path, path))
-                  table.insert(resolved_paths, path)
-                  path_set[path] = true
+                end
+                if not duplicate then
+                  table.insert(entry.ranges, range_info)
                 end
               end
             end)
