@@ -1,4 +1,4 @@
-local binary = require("supermaven-nvim.binary.binary_handler")
+local handler_factory = require("supermaven-nvim.handler_factory")
 local listener = require("supermaven-nvim.document_listener")
 local log = require("supermaven-nvim.logger")
 local u = require("supermaven-nvim.util")
@@ -8,31 +8,34 @@ local loop = u.uv
 local M = {}
 
 M.is_running = function()
-  return binary:is_running()
+  local handler = handler_factory.get_handler()
+  return handler:is_running()
 end
 
 M.start = function()
   if M.is_running() then
-    log:warn("Supermaven is already running.")
+    log:warn("Completion handler is already running.")
     return
   else
-    log:trace("Starting Supermaven...")
+    log:trace("Starting completion handler...")
   end
   vim.g.SUPERMAVEN_DISABLED = 0
-  binary:start_binary()
+  local handler = handler_factory.get_handler()
+  handler:start_binary()
   listener.setup()
 end
 
 M.stop = function()
   vim.g.SUPERMAVEN_DISABLED = 1
   if not M.is_running() then
-    log:warn("Supermaven is not running.")
+    log:warn("Completion handler is not running.")
     return
   else
-    log:trace("Stopping Supermaven...")
+    log:trace("Stopping completion handler...")
   end
   listener.teardown()
-  binary:stop_binary()
+  local handler = handler_factory.get_handler()
+  handler:stop_binary()
 end
 
 M.restart = function()
@@ -51,15 +54,18 @@ M.toggle = function()
 end
 
 M.use_free_version = function()
-  binary:use_free_version()
+  local handler = handler_factory.get_handler()
+  handler:use_free_version()
 end
 
 M.use_pro = function()
-  binary:use_pro()
+  local handler = handler_factory.get_handler()
+  handler:use_pro()
 end
 
 M.logout = function()
-  binary:logout()
+  local handler = handler_factory.get_handler()
+  handler:logout()
 end
 
 M.show_log = function()

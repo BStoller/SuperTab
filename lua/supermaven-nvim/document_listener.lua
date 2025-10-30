@@ -1,4 +1,4 @@
-local binary = require("supermaven-nvim.binary.binary_handler")
+local handler_factory = require("supermaven-nvim.handler_factory")
 local preview = require("supermaven-nvim.completion_preview")
 local config = require("supermaven-nvim.config")
 
@@ -17,7 +17,8 @@ M.setup = function()
       if not file_name or not buffer then
         return
       end
-      binary:on_update(buffer, file_name, "text_changed")
+      local handler = handler_factory.get_handler()
+      handler:on_update(buffer, file_name, "text_changed")
     end,
   })
 
@@ -49,7 +50,8 @@ M.setup = function()
       if not file_name or not buffer then
         return
       end
-      binary:on_update(buffer, file_name, "cursor")
+      local handler = handler_factory.get_handler()
+      handler:on_update(buffer, file_name, "cursor")
     end,
   })
 

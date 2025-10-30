@@ -4,7 +4,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-supermaven-nvim is a Neovim plugin that integrates Supermaven AI code completion into Neovim. The plugin communicates with a native binary via stdio, manages inline completion previews using extmarks, and integrates with nvim-cmp for completion menu display.
+supermaven-nvim is a Neovim plugin that provides AI code completion with two modes:
+1. **Supermaven Binary Mode** (default): Communicates with the native Supermaven binary via stdio
+2. **API Mode**: Uses OpenAI-compatible APIs for code completion
+
+The plugin manages inline completion previews using extmarks and integrates with nvim-cmp for completion menu display.
+
+## Configuration
+
+### Basic Setup (Supermaven Binary Mode)
+```lua
+require('supermaven-nvim').setup({})
+```
+
+### API Mode (OpenAI-Compatible)
+```lua
+require('supermaven-nvim').setup({
+  api = {
+    url = "https://api.openai.com/v1/chat/completions",  -- Or Ollama, Anthropic, etc.
+    api_key = "sk-...",  -- Your API key
+    model = "gpt-3.5-turbo",
+    max_tokens = 100,
+    temperature = 0.2,
+  }
+})
+```
+
+**Mode Selection**: API mode is automatically enabled if `api.url` or `api.api_key` is configured. Otherwise, binary mode is used.
 
 ## Code Style
 
@@ -16,11 +42,22 @@ supermaven-nvim is a Neovim plugin that integrates Supermaven AI code completion
 
 ### Core Components
 
+**Handler Factory (`handler_factory.lua`)**
+- Selects the appropriate handler (binary or API) based on configuration
+- Mode is determined once at plugin load time
+- Auto-detection: API mode if `api.url` or `api.api_key` is present
+
 **Binary Communication (`lua/supermaven-nvim/binary/`)**
 - `binary_handler.lua`: Manages the lifecycle of the Supermaven binary process, handles stdio communication, and processes completion responses
 - `binary_fetcher.lua`: Downloads and caches the platform-specific binary
 - The binary is spawned as a subprocess with stdio pipes and communicates via JSON messages prefixed with "SM-MESSAGE"
 - State management tracks completion requests via incrementing state IDs, with old states purged after 50 retained states
+
+**API Communication (`lua/supermaven-nvim/api/`)**
+- `api_handler.lua`: Implements the same interface as binary_handler but uses HTTP APIs
+- `http_client.lua`: Streaming HTTP client using vim.system() with curl for Server-Sent Events (SSE)
+- `prompt_builder.lua`: Converts file content + cursor position to OpenAI chat messages format
+- Supports any OpenAI-compatible API (OpenAI, Anthropic via proxy, Ollama, etc.)
 
 **Completion Preview (`completion_preview.lua`)**
 - Renders inline completions using Neovim's extmark API (`nvim_buf_set_extmark`)
@@ -66,19 +103,25 @@ supermaven-nvim is a Neovim plugin that integrates Supermaven AI code completion
 ```
 lua/supermaven-nvim/
 ├── init.lua              # Plugin entry point, setup()
+├── handler_factory.lua   # Mode selection (binary vs API)
 ├── api.lua               # Public API functions
 ├── commands.lua          # Vim user commands
 ├── config.lua            # Configuration management
 ├── completion_preview.lua # Inline completion rendering
 ├── document_listener.lua  # Buffer change tracking
+├── message_logger.lua    # Protocol message logging
 ├── cmp.lua               # nvim-cmp source integration
 ├── textual.lua           # Text processing utilities
 ├── util.lua              # General utilities
 ├── logger.lua            # Logging system
 ├── types.lua             # Type definitions
-└── binary/
-    ├── binary_handler.lua  # Binary process management
-    └── binary_fetcher.lua  # Binary download
+├── binary/
+│   ├── binary_handler.lua  # Binary process management
+│   └── binary_fetcher.lua  # Binary download
+└── api/
+    ├── api_handler.lua     # API mode handler
+    ├── http_client.lua     # Streaming HTTP client
+    └── prompt_builder.lua  # OpenAI prompt formatting
 ```
 
 ## Testing and Debugging
