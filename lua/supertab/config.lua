@@ -25,7 +25,6 @@ local default_config = {
       max_changes = 15, -- Keep last N changes in history
       max_diff_lines = 50, -- Limit diff size per change
       include_timestamps = false, -- Show when changes were made
-      -- Treesitter context extraction (currently disabled due to Neovim 0.11.0 compatibility issues)
       treesitter = {
         enabled = true, -- Enable/disable treesitter context
         max_depth = 2, -- How deep to follow imports (0-3)

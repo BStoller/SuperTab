@@ -227,107 +227,217 @@ function M.is_enabled()
   return true
 end
 
-local function read_file(path, max_lines)
-  local ok, fd = pcall(io.open, path, "r")
-  if not ok or not fd then
+-- Small synchronous read for config files (package.json, tsconfig.json)
+-- These are tiny and cached, so blocking is acceptable
+local function read_small_file_sync(path)
+  local fd = uv.fs_open(path, "r", 438)
+  if not fd then
     return nil
   end
 
-  local lines = {}
-  local count = 0
-  for line in fd:lines() do
-    count = count + 1
-    table.insert(lines, line)
-    if max_lines and max_lines > 0 and count >= max_lines then
-      table.insert(lines, "... (truncated)")
-      break
-    end
-  end
-
-  fd:close()
-
-  if #lines == 0 then
+  local stat = uv.fs_fstat(fd)
+  if not stat then
+    uv.fs_close(fd)
     return nil
   end
 
-  return table.concat(lines, "\n")
-end
-
-local function read_entire_file(path)
-  local ok, fd = pcall(io.open, path, "r")
-  if not ok or not fd then
+  local size = stat.size
+  if size == 0 or size > 1024 * 1024 then -- Max 1MB for "small" files
+    uv.fs_close(fd)
     return nil
   end
-  local content = fd:read("*a")
-  fd:close()
+
+  local content = uv.fs_read(fd, size, 0)
+  uv.fs_close(fd)
   return content
 end
 
-local function extract_file_segments(path, ranges, max_lines)
-  if not ranges or #ranges == 0 then
-    return read_file(path, max_lines)
-  end
-
-  local content = read_entire_file(path)
-  if not content then
-    return nil
-  end
-
-  local lines = vim.split(content, "\n", { plain = true })
-  table.sort(ranges, function(a, b)
-    if a.start_line == b.start_line then
-      return a.end_line < b.end_line
+local function read_file_async(path, max_lines, callback)
+  uv.fs_open(path, "r", 438, function(err_open, fd)
+    if err_open or not fd then
+      callback(nil)
+      return
     end
-    return a.start_line < b.start_line
+
+    uv.fs_fstat(fd, function(err_stat, stat)
+      if err_stat or not stat then
+        uv.fs_close(fd, function() end)
+        callback(nil)
+        return
+      end
+
+      local size = stat.size
+      if size == 0 then
+        uv.fs_close(fd, function() end)
+        callback(nil)
+        return
+      end
+
+      -- Read in chunks to handle max_lines
+      local chunk_size = 65536
+      local offset = 0
+      local accumulated = ""
+      local lines = {}
+
+      local function read_next_chunk()
+        uv.fs_read(fd, math.min(chunk_size, size - offset), offset, function(err_read, data)
+          if err_read or not data or data == "" then
+            uv.fs_close(fd, function() end)
+            if #lines == 0 then
+              callback(nil)
+            else
+              callback(table.concat(lines, "\n"))
+            end
+            return
+          end
+
+          accumulated = accumulated .. data
+          offset = offset + #data
+
+          -- Process complete lines
+          while true do
+            local line_end = accumulated:find("\n")
+            if line_end then
+              local line = accumulated:sub(1, line_end - 1)
+              accumulated = accumulated:sub(line_end + 1)
+              table.insert(lines, line)
+
+              if max_lines and max_lines > 0 and #lines >= max_lines then
+                table.insert(lines, "... (truncated)")
+                uv.fs_close(fd, function() end)
+                callback(table.concat(lines, "\n"))
+                return
+              end
+            else
+              break
+            end
+          end
+
+          -- Continue reading if not done
+          if offset < size then
+            read_next_chunk()
+          else
+            -- Process any remaining data
+            if #accumulated > 0 then
+              table.insert(lines, accumulated)
+            end
+            uv.fs_close(fd, function() end)
+            if #lines == 0 then
+              callback(nil)
+            else
+              callback(table.concat(lines, "\n"))
+            end
+          end
+        end)
+      end
+
+      read_next_chunk()
+    end)
   end)
+end
 
-  local pieces = {}
-  local total_lines = 0
-
-  for _, range in ipairs(ranges) do
-    if max_lines > 0 and total_lines >= max_lines then
-      break
+local function read_entire_file_async(path, callback)
+  uv.fs_open(path, "r", 438, function(err_open, fd)
+    if err_open or not fd then
+      callback(nil)
+      return
     end
 
-    local start_idx = math.max(1, (range.start_line or 0) + 1)
-    local end_exclusive = (range.end_line or (range.start_line or 0) + 1)
-    if end_exclusive <= (range.start_line or 0) then
-      end_exclusive = (range.start_line or 0) + 1
-    end
-    local end_idx = math.min(#lines, math.max(start_idx, end_exclusive))
+    uv.fs_fstat(fd, function(err_stat, stat)
+      if err_stat or not stat then
+        uv.fs_close(fd, function() end)
+        callback(nil)
+        return
+      end
 
-    if start_idx > #lines then
-      goto continue_range
+      local size = stat.size
+      if size == 0 then
+        uv.fs_close(fd, function() end)
+        callback(nil)
+        return
+      end
+
+      uv.fs_read(fd, size, 0, function(err_read, data)
+        uv.fs_close(fd, function() end)
+        if err_read or not data then
+          callback(nil)
+        else
+          callback(data)
+        end
+      end)
+    end)
+  end)
+end
+
+local function extract_file_segments_async(path, ranges, max_lines, callback)
+  if not ranges or #ranges == 0 then
+    read_file_async(path, max_lines, callback)
+    return
+  end
+
+  read_entire_file_async(path, function(content)
+    if not content then
+      callback(nil)
+      return
     end
 
-    local segment = {}
-    table.insert(segment, string.format("[lines %d-%d]", start_idx, end_idx))
-    for i = start_idx, end_idx do
-      table.insert(segment, lines[i])
-      total_lines = total_lines + 1
+    local lines = vim.split(content, "\n", { plain = true })
+    table.sort(ranges, function(a, b)
+      if a.start_line == b.start_line then
+        return a.end_line < b.end_line
+      end
+      return a.start_line < b.start_line
+    end)
+
+    local pieces = {}
+    local total_lines = 0
+
+    for _, range in ipairs(ranges) do
       if max_lines > 0 and total_lines >= max_lines then
         break
       end
+
+      local start_idx = math.max(1, (range.start_line or 0) + 1)
+      local end_exclusive = (range.end_line or (range.start_line or 0) + 1)
+      if end_exclusive <= (range.start_line or 0) then
+        end_exclusive = (range.start_line or 0) + 1
+      end
+      local end_idx = math.min(#lines, math.max(start_idx, end_exclusive))
+
+      if start_idx > #lines then
+        goto continue_range
+      end
+
+      local segment = {}
+      table.insert(segment, string.format("[lines %d-%d]", start_idx, end_idx))
+      for i = start_idx, end_idx do
+        table.insert(segment, lines[i])
+        total_lines = total_lines + 1
+        if max_lines > 0 and total_lines >= max_lines then
+          break
+        end
+      end
+
+      table.insert(pieces, table.concat(segment, "\n"))
+
+      if max_lines > 0 and total_lines >= max_lines then
+        break
+      end
+
+      ::continue_range::
     end
 
-    table.insert(pieces, table.concat(segment, "\n"))
+    if #pieces == 0 then
+      callback(nil)
+      return
+    end
 
+    local combined = table.concat(pieces, "\n\n")
     if max_lines > 0 and total_lines >= max_lines then
-      break
+      combined = combined .. "\n... (truncated)"
     end
-
-    ::continue_range::
-  end
-
-  if #pieces == 0 then
-    return nil
-  end
-
-  local combined = table.concat(pieces, "\n\n")
-  if max_lines > 0 and total_lines >= max_lines then
-    combined = combined .. "\n... (truncated)"
-  end
-  return combined
+    callback(combined)
+  end)
 end
 
 local function indent_block(text, prefix)
@@ -544,7 +654,7 @@ local function get_tsconfig_alias_resolver(file_path)
     return cache_entry.resolver
   end
 
-  local content = read_entire_file(tsconfig_path)
+  local content = read_small_file_sync(tsconfig_path)
   if not content then
     tsconfig_cache[tsconfig_path] = { mtime = mtime_sec, resolver = nil }
     return nil
@@ -669,7 +779,7 @@ local function get_package_metadata(module_root)
     return cached.data
   end
 
-  local content = read_entire_file(package_json_path)
+  local content = read_small_file_sync(package_json_path)
   if not content then
     package_metadata_cache[package_json_path] = { mtime = mtime_sec, data = nil }
     return nil
@@ -1122,13 +1232,15 @@ local function resolve_import_path(base_dir, import_path, alias_resolver)
   return nil
 end
 
-local function collect_import_contexts(file_path, import_paths, max_depth, max_files, max_lines, alias_resolver)
+local function collect_import_contexts_async(file_path, import_paths, max_depth, max_files, max_lines, alias_resolver, callback)
   if not file_path or file_path == "" then
-    return {}
+    callback({})
+    return
   end
 
   if not import_paths or #import_paths == 0 then
-    return {}
+    callback({})
+    return
   end
 
   local contexts = {}
@@ -1138,66 +1250,90 @@ local function collect_import_contexts(file_path, import_paths, max_depth, max_f
     visited[root_path] = true
   end
 
-  local function traverse(path, depth, current_resolver)
+  local function traverse(path, depth, current_resolver, on_traverse_complete)
     if depth > max_depth or #contexts >= max_files then
+      on_traverse_complete()
       return
     end
 
-    local content = read_file(path, max_lines)
-    if not content then
-      return
-    end
+    read_file_async(path, max_lines, function(content)
+      if not content then
+        on_traverse_complete()
+        return
+      end
 
-    local lang = get_language_from_path(path)
-    table.insert(contexts, {
-      path = path,
-      content = content,
-      language = lang,
-    })
+      local lang = get_language_from_path(path)
+      table.insert(contexts, {
+        path = path,
+        content = content,
+        language = lang,
+      })
 
-    if depth == max_depth or #contexts >= max_files then
-      return
-    end
+      if depth == max_depth or #contexts >= max_files then
+        on_traverse_complete()
+        return
+      end
 
-    local next_specs = extract_import_paths_from_text(content, lang)
-    if #next_specs == 0 then
-      return
-    end
+      local next_specs = extract_import_paths_from_text(content, lang)
+      if #next_specs == 0 then
+        on_traverse_complete()
+        return
+      end
 
-    local base_dir = dirname(path)
-    local next_resolver = get_tsconfig_alias_resolver(path) or current_resolver
-    for _, spec in ipairs(next_specs) do
-      local next_path = spec.specifier
-      local resolved = resolve_import_path(base_dir, next_path, next_resolver)
-      if resolved then
-        local normalized = normalize(resolved)
-        if normalized and not visited[normalized] then
-          visited[normalized] = true
-          traverse(resolved, depth + 1, next_resolver)
-          if #contexts >= max_files then
-            break
+      local base_dir = dirname(path)
+      local next_resolver = get_tsconfig_alias_resolver(path) or current_resolver
+
+      -- Process specs sequentially
+      local spec_index = 0
+      local function process_next_spec()
+        spec_index = spec_index + 1
+        if spec_index > #next_specs or #contexts >= max_files then
+          on_traverse_complete()
+          return
+        end
+
+        local spec = next_specs[spec_index]
+        local next_path = spec.specifier
+        local resolved = resolve_import_path(base_dir, next_path, next_resolver)
+        if resolved then
+          local normalized = normalize(resolved)
+          if normalized and not visited[normalized] then
+            visited[normalized] = true
+            traverse(resolved, depth + 1, next_resolver, process_next_spec)
+            return
           end
         end
+        process_next_spec()
       end
-    end
+
+      process_next_spec()
+    end)
   end
 
   local base_dir = dirname(file_path)
-  for _, import_path in ipairs(import_paths) do
+  local path_index = 0
+
+  local function process_next_import()
+    path_index = path_index + 1
+    if path_index > #import_paths or #contexts >= max_files then
+      callback(contexts)
+      return
+    end
+
+    local import_path = import_paths[path_index]
     local resolved = resolve_import_path(base_dir, import_path, alias_resolver)
     if resolved then
       local normalized = normalize(resolved)
       if normalized and not visited[normalized] then
         visited[normalized] = true
-        traverse(resolved, 1, alias_resolver)
-        if #contexts >= max_files then
-          break
-        end
+        traverse(resolved, 1, alias_resolver, process_next_import)
+        return
       end
     end
+    process_next_import()
   end
 
-  return contexts
+  process_next_import()
 end
 
 local function format_context_output(file_path, contexts)
@@ -1233,8 +1369,9 @@ local function finalize_refresh(file_path, changedtick, contexts)
 end
 
 local function fallback_refresh(file_path, import_paths, max_depth, max_files, max_lines, alias_resolver, changedtick)
-  local contexts = collect_import_contexts(file_path, import_paths, max_depth, max_files, max_lines, alias_resolver)
-  finalize_refresh(file_path, changedtick, contexts)
+  collect_import_contexts_async(file_path, import_paths, max_depth, max_files, max_lines, alias_resolver, function(contexts)
+    finalize_refresh(file_path, changedtick, contexts)
+  end)
 end
 
 local function schedule_lsp_refresh(bufnr, file_path, lang, import_nodes, import_paths, ts_conf, alias_resolver)
@@ -1300,86 +1437,102 @@ local function schedule_lsp_refresh(bufnr, file_path, lang, import_nodes, import
       local visited_paths = {}
       visited_paths[normalize(file_path)] = true
 
-      -- Function to recursively collect imports from resolved files
-      local function collect_recursive_imports(entries_to_process, current_depth)
+      -- Function to recursively collect imports from resolved files (async)
+      local function collect_recursive_imports(entries_to_process, current_depth, on_complete)
         if current_depth > import_depth or #contexts >= max_files then
+          on_complete()
           return
         end
 
         local next_level_paths = {}
+        local entry_index = 0
 
-        for _, entry in ipairs(entries_to_process) do
-          if #contexts >= max_files then
-            break
+        local function process_next_entry()
+          entry_index = entry_index + 1
+
+          if entry_index > #entries_to_process or #contexts >= max_files then
+            -- All entries processed at this depth, recurse to next level
+            if #next_level_paths > 0 and current_depth + 1 <= import_depth and #contexts < max_files then
+              log:debug(string.format("[treesitter] Recursing to depth %d with %d files", current_depth + 1, #next_level_paths))
+              collect_recursive_imports(next_level_paths, current_depth + 1, on_complete)
+            else
+              on_complete()
+            end
+            return
           end
+
+          local entry = entries_to_process[entry_index]
 
           -- Read the file content (respecting ranges if available)
-          local content
-          if entry.ranges and #entry.ranges > 0 then
-            content = extract_file_segments(entry.path, entry.ranges, max_lines_per_file)
-          else
-            content = read_file(entry.path, max_lines_per_file)
-          end
+          local read_callback = function(content)
+            if content then
+              log:debug(string.format("[treesitter] Including file %s at depth %d (%d bytes)", entry.path, current_depth, #content))
+              local lang = get_language_from_path(entry.path)
+              table.insert(contexts, {
+                path = entry.path,
+                content = content,
+                language = lang,
+              })
 
-          if content then
-            log:debug(string.format("[treesitter] Including file %s at depth %d (%d bytes)", entry.path, current_depth, #content))
-            local lang = get_language_from_path(entry.path)
-            table.insert(contexts, {
-              path = entry.path,
-              content = content,
-              language = lang,
-            })
+              -- Extract imports from this file to process at the next depth level
+              if current_depth < import_depth and #contexts < max_files then
+                read_entire_file_async(entry.path, function(full_content)
+                  if not full_content then
+                    log:debug(string.format("[treesitter] Could not read full content from %s for import extraction", entry.path))
+                    process_next_entry()
+                  else
+                    local import_specs = extract_import_paths_from_text(full_content, lang)
+                    log:debug(string.format("[treesitter] Found %d imports in %s", #import_specs, entry.path))
+                    if #import_specs > 0 then
+                      local base_dir = dirname(entry.path)
+                      local entry_resolver = get_tsconfig_alias_resolver(entry.path) or alias_resolver
 
-            -- Extract imports from this file to process at the next depth level
-            if current_depth < import_depth and #contexts < max_files then
-              local full_content = read_entire_file(entry.path)
-              if not full_content then
-                log:debug(string.format("[treesitter] Could not read full content from %s for import extraction", entry.path))
-              else
-                local import_specs = extract_import_paths_from_text(full_content, lang)
-                log:debug(string.format("[treesitter] Found %d imports in %s", #import_specs, entry.path))
-                if #import_specs > 0 then
-                  local base_dir = dirname(entry.path)
-                  local entry_resolver = get_tsconfig_alias_resolver(entry.path) or alias_resolver
+                      for _, spec in ipairs(import_specs) do
+                        if #contexts >= max_files then
+                          break
+                        end
 
-                  for _, spec in ipairs(import_specs) do
-                    if #contexts >= max_files then
-                      break
-                    end
-
-                    local resolved = resolve_import_path(base_dir, spec.specifier, entry_resolver)
-                    if resolved then
-                      local normalized = normalize(resolved)
-                      if normalized and not visited_paths[normalized] then
-                        visited_paths[normalized] = true
-                        table.insert(next_level_paths, { path = resolved, ranges = {} })
-                        log:debug(string.format("[treesitter] Discovered import '%s' from %s -> %s (will process at depth %d)", spec.specifier, entry.path, resolved, current_depth + 1))
-                      else
-                        log:debug(string.format("[treesitter] Skipping already visited: %s", normalized or resolved))
+                        local resolved = resolve_import_path(base_dir, spec.specifier, entry_resolver)
+                        if resolved then
+                          local normalized = normalize(resolved)
+                          if normalized and not visited_paths[normalized] then
+                            visited_paths[normalized] = true
+                            table.insert(next_level_paths, { path = resolved, ranges = {} })
+                            log:debug(string.format("[treesitter] Discovered import '%s' from %s -> %s (will process at depth %d)", spec.specifier, entry.path, resolved, current_depth + 1))
+                          else
+                            log:debug(string.format("[treesitter] Skipping already visited: %s", normalized or resolved))
+                          end
+                        else
+                          log:debug(string.format("[treesitter] Could not resolve import '%s' from %s", spec.specifier, entry.path))
+                        end
                       end
-                    else
-                      log:debug(string.format("[treesitter] Could not resolve import '%s' from %s", spec.specifier, entry.path))
                     end
+                    process_next_entry()
                   end
-                end
+                end)
+              else
+                process_next_entry()
               end
+            else
+              log:debug(string.format("[treesitter] No content extracted from %s (ranges: %d)", entry.path, entry.ranges and #entry.ranges or 0))
+              process_next_entry()
             end
+          end
+
+          if entry.ranges and #entry.ranges > 0 then
+            extract_file_segments_async(entry.path, entry.ranges, max_lines_per_file, read_callback)
           else
-            log:debug(string.format("[treesitter] No content extracted from %s (ranges: %d)", entry.path, entry.ranges and #entry.ranges or 0))
+            read_file_async(entry.path, max_lines_per_file, read_callback)
           end
         end
 
-        -- Recursively process the next level
-        if #next_level_paths > 0 and current_depth + 1 <= import_depth and #contexts < max_files then
-          log:debug(string.format("[treesitter] Recursing to depth %d with %d files", current_depth + 1, #next_level_paths))
-          collect_recursive_imports(next_level_paths, current_depth + 1)
-        end
+        process_next_entry()
       end
 
       -- Start recursive collection from the initial LSP-resolved entries
-      collect_recursive_imports(resolved_entries, 1)
-
-      finalize_refresh(file_path, changedtick, contexts)
+      collect_recursive_imports(resolved_entries, 1, function()
+        finalize_refresh(file_path, changedtick, contexts)
+      end)
     end
 
     local active_clients = {}
@@ -1589,18 +1742,21 @@ function M.extract_context(bufnr, file_path, lang, cursor)
     return cached
   end
 
-  local import_contexts =
-    collect_import_contexts(file_path, import_paths, import_depth, max_files, max_lines_per_file, alias_resolver)
-
-  if not import_contexts or #import_contexts == 0 then
-    return nil
+  -- No cache available - schedule async background collection
+  -- The cache will be populated for the next request
+  if import_depth > 0 and max_files > 0 then
+    collect_import_contexts_async(file_path, import_paths, import_depth, max_files, max_lines_per_file, alias_resolver, function(import_contexts)
+      if import_contexts and #import_contexts > 0 then
+        local formatted = format_context_output(file_path, import_contexts)
+        if formatted then
+          update_cache(file_path, changedtick, formatted)
+        end
+      end
+    end)
   end
 
-  local formatted = format_context_output(file_path, import_contexts)
-  if formatted then
-    update_cache(file_path, changedtick, formatted)
-  end
-  return formatted
+  -- Return nil on first call (no cache), subsequent calls will have cached data
+  return nil
 end
 
 return M
