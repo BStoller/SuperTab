@@ -89,4 +89,19 @@ M.clear_log = function()
   end
 end
 
+M.get_completion_metrics = function()
+  local handler = handler_factory.get_handler()
+  if handler.get_last_completion_metrics then
+    return handler:get_last_completion_metrics()
+  end
+  return {
+    token_count = 0,
+    char_count = 0,
+    start_time = nil,
+    end_time = nil,
+    duration_ms = 0,
+    first_token_ms = nil,
+  }
+end
+
 return M

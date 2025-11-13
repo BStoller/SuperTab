@@ -21,6 +21,16 @@ local BinaryLifecycle = {
   changed_document_list = {},
   last_state = nil,
   dust_strings = {},
+  -- Metrics tracking
+  last_completion_metrics = {
+    token_count = 0,
+    char_count = 0,
+    start_time = nil,
+    end_time = nil,
+    duration_ms = 0,
+    first_token_ms = nil,
+  },
+  request_start_times = {}, -- Maps state_id to start time
 }
 
 BinaryLifecycle.HARD_SIZE_LIMIT = 10e6
@@ -221,9 +231,46 @@ function BinaryLifecycle:update_state_id(message)
     -- Unknown state, could have been removed by purge_old_states
     return
   end
+
+  -- Track first token timing
+  if current_state.first_token_time == nil and #message.items > 0 then
+    current_state.first_token_time = loop.now()
+  end
+
   local state_completion = current_state.completion
   for _, completion in ipairs(message.items) do
     table.insert(state_completion, completion)
+
+    -- Check if this is the finish marker and update metrics
+    if completion.kind == "finish_edit" then
+      local end_time = loop.now()
+      local start_time = self.request_start_times[completion_state_id]
+
+      if start_time then
+        -- Calculate total text generated
+        local total_text = ""
+        for _, item in ipairs(state_completion) do
+          if item.kind == "text" then
+            total_text = total_text .. item.text
+          end
+        end
+
+        -- Update metrics
+        self.last_completion_metrics = {
+          token_count = vim.split(total_text, "%s+", { trimempty = true }) and #vim.split(total_text, "%s+", { trimempty = true }) or 0,
+          char_count = #total_text,
+          start_time = start_time,
+          end_time = end_time,
+          duration_ms = end_time - start_time,
+          first_token_ms = current_state.first_token_time and (current_state.first_token_time - start_time) or 0,
+        }
+
+        -- Clean up the start time
+        self.request_start_times[completion_state_id] = nil
+      end
+
+      current_state.has_ended = true
+    end
   end
 end
 
@@ -455,10 +502,15 @@ function BinaryLifecycle:submit_query(bufnr, prefix)
   self.changed_document_list = {}
   self.current_state_id = self.current_state_id + 1
   self:send_message(updates)
+
+  -- Track request start time
+  self.request_start_times[self.current_state_id] = loop.now()
+
   self.state_map[self.current_state_id] = {
     prefix = prefix,
     completion = {},
     has_ended = false,
+    first_token_time = nil,
   }
   self.last_state = {
     cursor = cursor_state,
@@ -601,6 +653,10 @@ function BinaryLifecycle:document_changed(full_path, buffer_text)
     path = full_path,
   }
   self:send_json(outgoing_message)
+end
+
+function BinaryLifecycle:get_last_completion_metrics()
+  return self.last_completion_metrics
 end
 
 return BinaryLifecycle

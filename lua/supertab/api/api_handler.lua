@@ -21,6 +21,15 @@ local APIHandler = {
   last_state = nil,
   active_request = nil,
   is_active = false,
+  -- Metrics tracking
+  last_completion_metrics = {
+    token_count = 0,
+    char_count = 0,
+    start_time = nil,
+    end_time = nil,
+    duration_ms = 0,
+    first_token_ms = nil,
+  },
 }
 
 APIHandler.HARD_SIZE_LIMIT = 10e6
@@ -305,9 +314,18 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
     body = vim.tbl_deep_extend("force", {}, body, extra_params)
   end
 
+  -- Initialize metrics for this request
+  local start_time = loop.now()
+  local first_token_time = nil
   local accumulated_text = ""
 
   local on_chunk = function(delta_content)
+    -- Track first token timing
+    if first_token_time == nil then
+      first_token_time = loop.now()
+      self.last_completion_metrics.first_token_ms = first_token_time - start_time
+    end
+
     accumulated_text = accumulated_text .. delta_content
 
     -- Update the state with the new text
@@ -320,6 +338,18 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
   end
 
   local on_done = function()
+    local end_time = loop.now()
+
+    -- Update metrics
+    self.last_completion_metrics = {
+      token_count = vim.split(accumulated_text, "%s+", { trimempty = true }) and #vim.split(accumulated_text, "%s+", { trimempty = true }) or 0,
+      char_count = #accumulated_text,
+      start_time = start_time,
+      end_time = end_time,
+      duration_ms = end_time - start_time,
+      first_token_ms = first_token_time and (first_token_time - start_time) or 0,
+    }
+
     local state = self.state_map[state_id]
     if state then
       -- Add finish marker
@@ -464,6 +494,10 @@ end
 
 function APIHandler:show_activation_message()
   -- Not applicable for API mode
+end
+
+function APIHandler:get_last_completion_metrics()
+  return self.last_completion_metrics
 end
 
 return APIHandler
