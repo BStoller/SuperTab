@@ -99,10 +99,15 @@ M.get_completion_metrics = function()
     char_count = 0,
     input_char_count = 0,
     output_char_count = 0,
+    input_tokens = 0,
+    output_tokens = 0,
+    total_tokens = 0,
     start_time = nil,
     end_time = nil,
     duration_ms = 0,
     first_token_ms = nil,
+    prompt_time_ms = nil,
+    completion_time_ms = nil,
   }
 end
 

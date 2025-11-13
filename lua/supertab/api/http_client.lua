@@ -96,9 +96,14 @@ function M.stream_post(url, headers, body, on_chunk, on_done, on_error)
                 local delta = parsed.choices[1].delta
                 if delta.content then
                   vim.schedule(function()
-                    on_chunk(delta.content)
+                    on_chunk(delta.content, parsed.usage)
                   end)
                 end
+              -- Even if no delta content, pass usage if available (final chunk)
+              elseif parsed.usage then
+                vim.schedule(function()
+                  on_chunk(nil, parsed.usage)
+                end)
               end
             elseif message:match("data: %[DONE%]") then
               vim.schedule(function()

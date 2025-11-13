@@ -27,10 +27,15 @@ local APIHandler = {
     char_count = 0,
     input_char_count = 0,
     output_char_count = 0,
+    input_tokens = 0,
+    output_tokens = 0,
+    total_tokens = 0,
     start_time = nil,
     end_time = nil,
     duration_ms = 0,
     first_token_ms = nil,
+    prompt_time_ms = nil,
+    completion_time_ms = nil,
   },
 }
 
@@ -320,6 +325,7 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
   local start_time = loop.now()
   local first_token_time = nil
   local accumulated_text = ""
+  local usage_data = nil
 
   -- Calculate input character count from messages
   local input_char_count = 0
@@ -329,21 +335,28 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
     end
   end
 
-  local on_chunk = function(delta_content)
+  local on_chunk = function(delta_content, usage)
+    -- Store usage data if provided
+    if usage then
+      usage_data = usage
+    end
+
     -- Track first token timing
-    if first_token_time == nil then
+    if delta_content and first_token_time == nil then
       first_token_time = loop.now()
       self.last_completion_metrics.first_token_ms = first_token_time - start_time
     end
 
-    accumulated_text = accumulated_text .. delta_content
+    if delta_content then
+      accumulated_text = accumulated_text .. delta_content
 
-    -- Update the state with the new text
-    local state = self.state_map[state_id]
-    if state then
-      state.completion = {
-        { kind = "text", text = accumulated_text },
-      }
+      -- Update the state with the new text
+      local state = self.state_map[state_id]
+      if state then
+        state.completion = {
+          { kind = "text", text = accumulated_text },
+        }
+      end
     end
   end
 
@@ -352,15 +365,41 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
 
     -- Update metrics
     local output_char_count = #accumulated_text
+
+    -- Use API usage data if available, otherwise fall back to approximations
+    local input_tokens = 0
+    local output_tokens = 0
+    local total_tokens = 0
+    local prompt_time_ms = nil
+    local completion_time_ms = nil
+
+    if usage_data then
+      input_tokens = usage_data.prompt_tokens or 0
+      output_tokens = usage_data.completion_tokens or 0
+      total_tokens = usage_data.total_tokens or 0
+      -- Convert seconds to milliseconds if timing data is available
+      if usage_data.prompt_time then
+        prompt_time_ms = math.floor(usage_data.prompt_time * 1000)
+      end
+      if usage_data.completion_time then
+        completion_time_ms = math.floor(usage_data.completion_time * 1000)
+      end
+    end
+
     self.last_completion_metrics = {
-      token_count = vim.split(accumulated_text, "%s+", { trimempty = true }) and #vim.split(accumulated_text, "%s+", { trimempty = true }) or 0,
+      token_count = output_tokens > 0 and output_tokens or (vim.split(accumulated_text, "%s+", { trimempty = true }) and #vim.split(accumulated_text, "%s+", { trimempty = true }) or 0),
       char_count = input_char_count + output_char_count,
       input_char_count = input_char_count,
       output_char_count = output_char_count,
+      input_tokens = input_tokens,
+      output_tokens = output_tokens,
+      total_tokens = total_tokens,
       start_time = start_time,
       end_time = end_time,
       duration_ms = end_time - start_time,
       first_token_ms = first_token_time and (first_token_time - start_time) or 0,
+      prompt_time_ms = prompt_time_ms,
+      completion_time_ms = completion_time_ms,
     }
 
     local state = self.state_map[state_id]
