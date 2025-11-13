@@ -94,12 +94,15 @@ function M.stream_post(url, headers, body, on_chunk, on_done, on_error)
               -- Extract delta content from OpenAI format
               if parsed.choices and parsed.choices[1] and parsed.choices[1].delta then
                 local delta = parsed.choices[1].delta
-                if delta.content then
+                local content = delta.content
+                local has_data = content or parsed.usage
+
+                if has_data then
                   vim.schedule(function()
-                    on_chunk(delta.content, parsed.usage)
+                    on_chunk(content, parsed.usage)
                   end)
                 end
-              -- Even if no delta content, pass usage if available (final chunk)
+              -- Handle chunks that only have usage (no choices array)
               elseif parsed.usage then
                 vim.schedule(function()
                   on_chunk(nil, parsed.usage)
