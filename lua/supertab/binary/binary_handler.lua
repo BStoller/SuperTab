@@ -25,6 +25,8 @@ local BinaryLifecycle = {
   last_completion_metrics = {
     token_count = 0,
     char_count = 0,
+    input_char_count = 0,
+    output_char_count = 0,
     start_time = nil,
     end_time = nil,
     duration_ms = 0,
@@ -256,9 +258,13 @@ function BinaryLifecycle:update_state_id(message)
         end
 
         -- Update metrics
+        local output_char_count = #total_text
+        local input_char_count = current_state.input_char_count or 0
         self.last_completion_metrics = {
           token_count = vim.split(total_text, "%s+", { trimempty = true }) and #vim.split(total_text, "%s+", { trimempty = true }) or 0,
-          char_count = #total_text,
+          char_count = input_char_count + output_char_count,
+          input_char_count = input_char_count,
+          output_char_count = output_char_count,
           start_time = start_time,
           end_time = end_time,
           duration_ms = end_time - start_time,
@@ -503,14 +509,23 @@ function BinaryLifecycle:submit_query(bufnr, prefix)
   self.current_state_id = self.current_state_id + 1
   self:send_message(updates)
 
-  -- Track request start time
+  -- Track request start time and input size
   self.request_start_times[self.current_state_id] = loop.now()
+
+  -- Calculate input character count from updates
+  local input_char_count = 0
+  for _, update in ipairs(updates) do
+    if update.content then
+      input_char_count = input_char_count + #update.content
+    end
+  end
 
   self.state_map[self.current_state_id] = {
     prefix = prefix,
     completion = {},
     has_ended = false,
     first_token_time = nil,
+    input_char_count = input_char_count,
   }
   self.last_state = {
     cursor = cursor_state,

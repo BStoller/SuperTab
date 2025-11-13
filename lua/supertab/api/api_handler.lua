@@ -25,6 +25,8 @@ local APIHandler = {
   last_completion_metrics = {
     token_count = 0,
     char_count = 0,
+    input_char_count = 0,
+    output_char_count = 0,
     start_time = nil,
     end_time = nil,
     duration_ms = 0,
@@ -319,6 +321,14 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
   local first_token_time = nil
   local accumulated_text = ""
 
+  -- Calculate input character count from messages
+  local input_char_count = 0
+  for _, message in ipairs(messages) do
+    if message.content then
+      input_char_count = input_char_count + #message.content
+    end
+  end
+
   local on_chunk = function(delta_content)
     -- Track first token timing
     if first_token_time == nil then
@@ -341,9 +351,12 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
     local end_time = loop.now()
 
     -- Update metrics
+    local output_char_count = #accumulated_text
     self.last_completion_metrics = {
       token_count = vim.split(accumulated_text, "%s+", { trimempty = true }) and #vim.split(accumulated_text, "%s+", { trimempty = true }) or 0,
-      char_count = #accumulated_text,
+      char_count = input_char_count + output_char_count,
+      input_char_count = input_char_count,
+      output_char_count = output_char_count,
       start_time = start_time,
       end_time = end_time,
       duration_ms = end_time - start_time,

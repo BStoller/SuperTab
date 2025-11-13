@@ -97,6 +97,8 @@ M.get_completion_metrics = function()
   return {
     token_count = 0,
     char_count = 0,
+    input_char_count = 0,
+    output_char_count = 0,
     start_time = nil,
     end_time = nil,
     duration_ms = 0,
