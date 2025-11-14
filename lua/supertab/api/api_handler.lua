@@ -36,6 +36,7 @@ local APIHandler = {
     first_token_ms = nil,
     prompt_time_ms = nil,
     completion_time_ms = nil,
+    context_file_count = 0,
   },
 }
 
@@ -284,6 +285,7 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
 
   -- Get treesitter context if enabled
   local treesitter_context = nil
+  local context_file_count = 0
   if treesitter_extractor.is_enabled() then
     -- Determine language from file extension
     local file_ext = file_path:match("%.([^%.]+)$")
@@ -298,7 +300,11 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
     }
     local lang = lang_map[file_ext] or file_ext
 
-    treesitter_context = treesitter_extractor.extract_context(self.buffer, file_path, lang, self.cursor)
+    local context_result = treesitter_extractor.extract_context(self.buffer, file_path, lang, self.cursor)
+    if context_result then
+      treesitter_context = context_result.context
+      context_file_count = context_result.file_count or 0
+    end
   end
 
   local messages =
@@ -400,6 +406,7 @@ function APIHandler:request_completion(state_id, file_path, buffer_text, cursor_
       first_token_ms = first_token_time and (first_token_time - start_time) or 0,
       prompt_time_ms = prompt_time_ms,
       completion_time_ms = completion_time_ms,
+      context_file_count = context_file_count,
     }
 
     local state = self.state_map[state_id]

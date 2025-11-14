@@ -108,6 +108,7 @@ M.get_completion_metrics = function()
     first_token_ms = nil,
     prompt_time_ms = nil,
     completion_time_ms = nil,
+    context_file_count = 0,
   }
 end
 

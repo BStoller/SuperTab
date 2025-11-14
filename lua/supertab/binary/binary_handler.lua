@@ -31,6 +31,7 @@ local BinaryLifecycle = {
     end_time = nil,
     duration_ms = 0,
     first_token_ms = nil,
+    context_file_count = 0,
   },
   request_start_times = {}, -- Maps state_id to start time
 }
@@ -269,6 +270,7 @@ function BinaryLifecycle:update_state_id(message)
           end_time = end_time,
           duration_ms = end_time - start_time,
           first_token_ms = current_state.first_token_time and (current_state.first_token_time - start_time) or 0,
+          context_file_count = 0, -- Binary handler doesn't use treesitter context
         }
 
         -- Clean up the start time

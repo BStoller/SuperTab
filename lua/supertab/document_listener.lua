@@ -2,6 +2,7 @@ local handler_factory = require("supertab.handler_factory")
 local preview = require("supertab.completion_preview")
 local config = require("supertab.config")
 local context_tracker = require("supertab.context_tracker")
+local treesitter_extractor = require("supertab.treesitter.context_extractor")
 
 local M = {
   augroup = nil,
@@ -24,7 +25,7 @@ M.setup = function()
   })
 
   vim.api.nvim_create_autocmd({ "BufEnter" }, {
-    callback = function(_)
+    callback = function(event)
       local ok, api = pcall(require, "supertab.api")
       if not ok then
         return
@@ -40,6 +41,22 @@ M.setup = function()
           return
         end
         api.start()
+      end
+
+      -- Proactively warm treesitter context cache when entering a buffer
+      if treesitter_extractor.is_enabled() then
+        local bufnr = event.buf
+        if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+          local file_path = vim.api.nvim_buf_get_name(bufnr)
+          if file_path and file_path ~= "" then
+            -- Defer to not interfere with buffer opening
+            vim.defer_fn(function()
+              if vim.api.nvim_buf_is_valid(bufnr) then
+                treesitter_extractor.warm_cache(bufnr, file_path, nil)
+              end
+            end, 200)
+          end
+        end
       end
     end,
   })
@@ -76,6 +93,43 @@ M.setup = function()
       if context_tracker.is_enabled() then
         context_tracker.record_change(bufnr)
       end
+
+      -- Warm treesitter context cache after editing session
+      if treesitter_extractor.is_enabled() then
+        local file_path = vim.api.nvim_buf_get_name(bufnr)
+        if file_path and file_path ~= "" then
+          vim.defer_fn(function()
+            treesitter_extractor.warm_cache(bufnr, file_path, nil)
+          end, 100)
+        end
+      end
+    end,
+  })
+
+  -- Refresh cache after saving (dependencies may have changed)
+  vim.api.nvim_create_autocmd({ "BufWritePost" }, {
+    group = M.augroup,
+    callback = function(event)
+      if not treesitter_extractor.is_enabled() then
+        return
+      end
+
+      local bufnr = event.buf
+      if not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+      end
+
+      local file_path = vim.api.nvim_buf_get_name(bufnr)
+      if not file_path or file_path == "" then
+        return
+      end
+
+      -- Defer slightly to not interfere with save operations
+      vim.defer_fn(function()
+        if vim.api.nvim_buf_is_valid(bufnr) then
+          treesitter_extractor.warm_cache(bufnr, file_path, nil)
+        end
+      end, 100)
     end,
   })
 

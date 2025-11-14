@@ -124,7 +124,7 @@ local function get_cached_context(path, changedtick)
   return entry.context
 end
 
-local function update_cache(path, changedtick, context)
+local function update_cache(path, changedtick, context, file_count)
   local key = cache_key_for_path(path)
   if key == "" then
     return
@@ -132,6 +132,7 @@ local function update_cache(path, changedtick, context)
   context_cache[key] = {
     changedtick = changedtick,
     context = context,
+    file_count = file_count or 0,
     timestamp = uv.now(),
   }
 end
@@ -1338,7 +1339,7 @@ end
 
 local function format_context_output(file_path, contexts)
   if not contexts or #contexts == 0 then
-    return nil
+    return nil, 0
   end
 
   local pieces = {}
@@ -1357,14 +1358,14 @@ local function format_context_output(file_path, contexts)
     end
   end
 
-  return table.concat(pieces, "\n")
+  return table.concat(pieces, "\n"), #contexts
 end
 
 local function finalize_refresh(file_path, changedtick, contexts)
   clear_job(file_path)
-  local formatted = format_context_output(file_path, contexts)
+  local formatted, file_count = format_context_output(file_path, contexts)
   if formatted then
-    update_cache(file_path, changedtick, formatted)
+    update_cache(file_path, changedtick, formatted, file_count)
   end
 end
 
@@ -1671,6 +1672,107 @@ local function schedule_lsp_refresh(bufnr, file_path, lang, import_nodes, import
   end)
 end
 
+local function trigger_context_refresh(bufnr, file_path, lang, changedtick)
+  -- This function triggers all refresh operations in the background
+  -- and never blocks the caller
+  vim.schedule(function()
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
+
+    local ts_conf = get_ts_config() or {}
+    local max_lines_per_file = ts_conf.max_lines_per_file or 200
+    local max_files = math.max(0, ts_conf.max_files or 20)
+    local import_depth = math.max(0, ts_conf.max_depth or 0)
+
+    if max_files <= 0 or import_depth <= 0 then
+      return
+    end
+
+    local effective_lang = lang or get_language_from_path(file_path) or vim.bo[bufnr].filetype
+    if not effective_lang or effective_lang == "" then
+      return
+    end
+
+    local parser_ok, parser = pcall(vim.treesitter.get_parser, bufnr, effective_lang)
+    if not parser_ok or not parser then
+      log:debug(string.format("[treesitter] No parser for %s (%s)", file_path, effective_lang or ""))
+      return
+    end
+
+    local parsed_ok, tree = pcall(function()
+      local parsed = parser:parse()
+      return parsed and parsed[1] or nil
+    end)
+
+    if not parsed_ok or not tree then
+      log:debug(string.format("[treesitter] Failed to parse buffer %d", bufnr))
+      return
+    end
+
+    local root = tree:root()
+    if not root then
+      return
+    end
+
+    local import_paths, import_nodes = extract_import_paths_from_tree(root, bufnr, effective_lang)
+    if not import_paths or #import_paths == 0 then
+      return
+    end
+
+    local alias_resolver = get_tsconfig_alias_resolver(file_path)
+
+    -- Trigger LSP refresh (async)
+    schedule_lsp_refresh(bufnr, file_path, effective_lang, import_nodes, import_paths, ts_conf, alias_resolver)
+
+    -- Also trigger fallback collection (async)
+    collect_import_contexts_async(file_path, import_paths, import_depth, max_files, max_lines_per_file, alias_resolver, function(import_contexts)
+      if import_contexts and #import_contexts > 0 then
+        local formatted, file_count = format_context_output(file_path, import_contexts)
+        if formatted then
+          update_cache(file_path, changedtick, formatted, file_count)
+        end
+      end
+    end)
+  end)
+end
+
+function M.warm_cache(bufnr, file_path, lang)
+  -- Proactively warm the cache in the background
+  -- This should be called on buffer events (BufEnter, BufWritePost, etc.)
+  -- to ensure context is ready before completion requests
+  if not M.is_enabled() then
+    return
+  end
+
+  if bufnr == nil or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+
+  if not file_path or file_path == "" then
+    return
+  end
+
+  local changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+
+  -- Check if we already have a recent cache
+  local cached = get_cached_context(file_path, changedtick)
+  if cached then
+    local key = cache_key_for_path(file_path)
+    local entry = context_cache[key]
+    if entry and entry.timestamp then
+      local age_ms = uv.now() - entry.timestamp
+      -- If cache is less than 5 seconds old, don't refresh yet
+      if age_ms < 5000 then
+        return
+      end
+    end
+  end
+
+  -- Trigger background refresh
+  trigger_context_refresh(bufnr, file_path, lang, changedtick)
+end
+
 function M.extract_context(bufnr, file_path, lang, cursor)
   if not M.is_enabled() then
     return nil
@@ -1689,74 +1791,29 @@ function M.extract_context(bufnr, file_path, lang, cursor)
     return nil
   end
 
-  local ts_conf = get_ts_config() or {}
-  local max_lines_per_file = ts_conf.max_lines_per_file or 200
-  local max_files = math.max(0, ts_conf.max_files or 20)
-  local import_depth = math.max(0, ts_conf.max_depth or 0)
-
-  if max_files <= 0 or import_depth <= 0 then
-    return nil
-  end
-
-  local effective_lang = lang or get_language_from_path(file_path) or vim.bo[bufnr].filetype
-  if not effective_lang or effective_lang == "" then
-    return nil
-  end
-
-  local parser_ok, parser = pcall(vim.treesitter.get_parser, bufnr, effective_lang)
-  if not parser_ok or not parser then
-    log:debug(string.format("[treesitter] No parser for %s (%s)", file_path, effective_lang or ""))
-    return nil
-  end
-
-  local parsed_ok, tree = pcall(function()
-    local parsed = parser:parse()
-    return parsed and parsed[1] or nil
-  end)
-
-  if not parsed_ok or not tree then
-    log:debug(string.format("[treesitter] Failed to parse buffer %d", bufnr))
-    return nil
-  end
-
-  local root = tree:root()
-  if not root then
-    return nil
-  end
-
-  local import_paths, import_nodes = extract_import_paths_from_tree(root, bufnr, effective_lang)
-  if not import_paths or #import_paths == 0 then
-    return get_cached_context(file_path, vim.api.nvim_buf_get_changedtick(bufnr))
-  end
-
   local changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+
+  -- ALWAYS return cache immediately (even if nil/stale)
   local cached = get_cached_context(file_path, changedtick)
 
-  local alias_resolver = get_tsconfig_alias_resolver(file_path)
+  -- Trigger background refresh without waiting
+  trigger_context_refresh(bufnr, file_path, lang, changedtick)
 
-  if import_depth > 0 and max_files > 0 then
-    schedule_lsp_refresh(bufnr, file_path, effective_lang, import_nodes, import_paths, ts_conf, alias_resolver)
+  -- Return immediately - never block
+  -- Return both context string and metadata
+  if not cached then
+    return nil
   end
 
-  if cached then
-    return cached
-  end
+  -- Get file count from cache entry
+  local key = cache_key_for_path(file_path)
+  local entry = context_cache[key]
+  local file_count = entry and entry.file_count or 0
 
-  -- No cache available - schedule async background collection
-  -- The cache will be populated for the next request
-  if import_depth > 0 and max_files > 0 then
-    collect_import_contexts_async(file_path, import_paths, import_depth, max_files, max_lines_per_file, alias_resolver, function(import_contexts)
-      if import_contexts and #import_contexts > 0 then
-        local formatted = format_context_output(file_path, import_contexts)
-        if formatted then
-          update_cache(file_path, changedtick, formatted)
-        end
-      end
-    end)
-  end
-
-  -- Return nil on first call (no cache), subsequent calls will have cached data
-  return nil
+  return {
+    context = cached,
+    file_count = file_count,
+  }
 end
 
 return M
